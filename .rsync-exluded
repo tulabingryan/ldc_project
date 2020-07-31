@@ -1,0 +1,11 @@
+history
+logs
+**config_self.json**
+**__pycache__**
+**ldc_agg_melted.db**
+**homedata.db**
+**market.db**
+**sensors.db**
+**sensors2.db**
+**measurements.db**
+**latest_weather.csv

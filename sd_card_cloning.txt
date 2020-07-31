@@ -1,0 +1,13 @@
+
+# to clone sd_card
+# insert sd_card to be cloned
+sudo fdisk -l  # list the available memory blocks and partitions
+# choose the block pertaining to the sd_card, e.g., usually mmcblk0
+sudo umount /dev/mmcblock0  # unmount the block, manually unmount if not possible to do in terminal
+# copy sd_card to local disk
+sudo dd if=/dev/mmcblk0 bs=32M | pv -s 2G | sudo dd of=sd_card_back.dd bs=32M
+# unplug sd_card
+# insert new sd_card to put the cloned image
+sudo fdisk -l  # see the name of the new sd_card
+sudo umount /dev/mmcblk0 # unmount the sd_card 
+sudo dd if=sd_card_back.dd bs=32M | pv -s 2G | sudo dd of=/dev/mmcblk0 bs=32M

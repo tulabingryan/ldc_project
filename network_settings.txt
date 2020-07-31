@@ -1,0 +1,119 @@
+# TRANSFORMER SIDE
+Router: SPARK MODEM
+PUBLIC IP: Dynamic from ISP
+LAN: 192.168.1.254
+RANGE: 192.168.1-253
+
+RASPI ADDRESS (for grid_server)
+grid_server: 192.168.1.2
+
+
+#-----------------------------
+HOUSE 2
+Router1: Nighthawk
+SSID: NETGEAR79
+PASS: unevenhat662
+Internet IP: 192.168.1.12
+LAN: 192.168.2.1   
+RANGE: 192.168.2.21 - 254
+
+RASPI ADDRESS
+home_server: 192.168.2.3:30000
+waterheater:
+hvac:
+freezer:
+fridge:
+ev:
+storage:
+washingmachine:
+dryer:
+dishwasher:
+house: 192.168.2.3
+
+#--------------------------------
+HOUSE 3
+Router1: Netgear Genie, Nighthawk X10 R9000
+SSID: NETGEAR62
+PASS: phobicfinch821
+Internet IP: 192.168.1.13
+LAN: 192.168.3.1
+RANGE: 192.168.3.21 - 254
+
+RASPI ADDRESS
+home_server: 192.168.3.3:30000
+waterheater:
+hvac:
+freezer:
+fridge:
+ev:
+storage:
+washingmachine:
+dryer:
+dishwasher:
+house:192.168.3.3
+
+#------------------------------
+HOUSE 4
+Router1: ASUS_H4, user=admin, password=ArdmoreECE098
+Internet IP: 192.168.1.14
+LAN: 192.168.4.1
+RANGE: 192.168.4.21 - 254
+
+RASPI ADDRESS
+home_server: 192.168.4.3:30000
+waterheater:
+hvac:
+freezer:
+fridge:
+ev:
+storage:
+washingmachine:
+dryer:
+dishwasher:
+house:192.168.4.3
+
+#-----------------------------
+HOUSE 5
+Router1: ASUS_H5, user=admin, password=ArdmoreECE098
+Internet IP: 192.168.1.15
+LAN: 192.168.5.1
+RANGE: 192.168.5.21 - 254
+
+RASPI ADDRESS
+home_server: 192.168.5.3:30000
+waterheater:
+hvac:
+freezer:
+fridge:
+ev:
+storage:
+washingmachine:
+dryer:
+dishwasher:
+house:192.168.5.3
+
+#-------------------------------
+HOUSE 1
+Router1: 
+Internet IP: 192.168.1.1
+LAN: 192.168.6.1
+RANGE: 192.168.6.2 - 254
+
+RASPI ADDRESS
+home_server: 192.168.6.3:30000
+waterheater:
+hvac:
+freezer:
+fridge:
+ev:
+storage:
+washingmachine:
+dryer:
+dishwasher:
+house:192.168.6.3
+
+#--------------------------------------
+Grid server
+router: SPARK-EVS5UK, 192.168.1.254, user=admin, password=admin
+tcp_server: 192.168.1.3, port=15003
+pc: 192.168.1.81, port=15003

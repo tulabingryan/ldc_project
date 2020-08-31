@@ -1,1 +1,0 @@
-{"h5_100": {"id": "h5_100", "group": "h5", "hardware": "raspi3", "local_ip": "192.168.15.100", "role": "aggregator"}, "h5_112": {"id": "h5_112", "group": "h5", "hardware": "raspi0", "local_ip": "192.168.15.112", "role": "waterheater"}}

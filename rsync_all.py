@@ -42,7 +42,7 @@ def read_json(filename):
 
 def sync_folders(from_path='/home/pi/ldc_project/', to_host='pi@192.168.11.120', to_path='/home/pi/ldc_project/', ssh_password="ldc"):
   try:
-      cmd = 'sshpass -p "{}" rsync -avuzhe ssh --progress --exclude-from ".rsync-exluded" --delete {} {}:{}'.format(ssh_password, from_path, to_host, to_path) 
+      cmd = 'sshpass -p "{}" rsync -avuzhe ssh --progress --exclude-from ".rsync-exluded" --force --delete {} {}:{}'.format(ssh_password, from_path, to_host, to_path) 
       # cmd = 'sshpass -p "{}" rsync -auzhe ssh --exclude-from ".rsync-exluded" --delete {} {}:{}'.format(ssh_password, from_path, to_host, to_path) 
       os.system(cmd)      
   except Exception as e:

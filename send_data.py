@@ -25,23 +25,29 @@ def delete_old(path='*.*', n_retain=1):
     os.system(cmd)
 
 
-def sync_files(dict_paths={
-  '/home/pi/ldc_project/history/':'pi@192.168.1.81:/home/pi/studies/ardmore/data/',
-  '/home/pi/ldc_project/logs/':'pi@192.168.1.81:/home/pi/studies/ardmore/logs/',
-  }, remove_source=False):
-  
-  try:
-    for from_path in dict_paths:
-      to_path = dict_paths[from_path]
+def sync_files(dict_paths, remove_source=False, options='-auzhe'):
+  '''
+  -v, –verbose                             Verbose output
+  -q, –quiet                                  suppress message output
+  -a, –archive                              archive files and directory while synchronizing ( -a equal to following options -rlptgoD)
+  -r, –recursive                           sync files and directories recursively
+  -b, –backup                              take the backup during synchronization
+  -u, –update                              don’t copy the files from source to destination if destination files are newer
+  -l, –links                                   copy symlinks as symlinks during the sync
+  -n, –dry-run                             perform a trial run without synchronization
+  -e, –rsh=COMMAND            mention the remote shell to use in rsync
+  -z, –compress                          compress file data during the transfer
+  -h, –human-readable            display the output numbers in a human-readable format
+  –progress                                 show the sync progress during transfer
+  '''
+  for from_path, to_path in dict_paths.items():
+    try:
       if remove_source:
-        cmd = 'sshpass -p "ldc" rsync -avuzhe ssh --remove-source-files {} {}'.format(from_path, to_path) 
-        os.system(cmd) 
+        os.system(f'sshpass -p "ldc" rsync {options} ssh --remove-source-files {from_path} {to_path}') 
       else:
-        cmd = 'sshpass -p "ldc" rsync -avuzhe ssh {} {}'.format(from_path, to_path) 
-        os.system(cmd) 
-  except Exception as e:
-    print("Error:", e)
-    raise e
+        os.system(f'sshpass -p "ldc" rsync {options} ssh {from_path} {to_path}')
+    except Exception as e:
+      print("Error:", e, from_path, to_path)
       
 
 def get_local_ip(report=False):
@@ -65,6 +71,18 @@ def main():
   parser = OptionParser(version=' ')
   parser.add_option('-n', '--n', dest='n', default=0, help='now')
   options, args = parser.parse_args(sys.argv[1:])
+  dict_paths={
+          '/home/pi/ldc_project/history/': 'pi@192.168.1.81:/home/pi/studies/ardmore/data/',
+          '/home/pi/ldc_project/logs/': 'pi@192.168.1.81:/home/pi/studies/ardmore/logs/',
+          '/home/pi/ldc_project/ldc_homeserver/history/': 'pi@192.168.1.81:/home/pi/studies/ardmore/homeserver/',
+          'pi@192.168.1.81:/home/pi/ldc_project/ldc_gridserver/dict_cmd.txt': '/home/pi/ldc_project/ldc_simulator/dict_cmd.txt',
+          }
+  interval = 60
+  if not options.n:
+    print(f'sending files quitely every {interval}s...')
+    for from_path, to_path in dict_paths.items():
+      print(f'    {from_path} ---> {to_path}')
+
   while True:
     try:
       local_ip = get_local_ip()  # ensures network connection
@@ -74,26 +92,19 @@ def main():
         sync_files(dict_paths={
           '/home/pi/ldc_project/history/':'pi@192.168.1.81:/home/pi/studies/ardmore/data/',
           '/home/pi/ldc_project/logs/':'pi@192.168.1.81:/home/pi/studies/ardmore/logs/',
-          '/home/pi/ldc_project/ldc_homeserver/history/':'/home/pi/studies/ardmore/homeserver/',
-          },remove_source=False)
+          '/home/pi/ldc_project/ldc_homeserver/history/':'pi@192.168.1.81:/home/pi/studies/ardmore/homeserver/',
+          }, options='-avuzhe', remove_source=False)
+
       elif ((dt.tm_hour==23) and (dt.tm_min>=55)):
         delete_old('/home/pi/ldc_project/logs/*', n_retain=0)
         delete_old('/home/pi/ldc_project/history/*', n_retain=5)
+        delete_old('/home/pi/ldc_project/ldc_homeserver/history/*', n_retain=5)
       else:
-        sync_files(remove_source=False)
-        sync_files(dict_paths={
-          'pi@192.168.1.81:/home/pi/ldc_project/ldc_gridserver/dict_cmd.txt':'/home/pi/ldc_project/ldc_simulator/dict_cmd.txt',
-          }, remove_source=False)
-        sync_files(dict_paths={
-          'pi@192.168.1.81:/home/pi/ldc_project/ldc_simulator/':'/home/pi/ldc_project/ldc_simulator/',
-          }, remove_source=False)
-        # sync_files(dict_paths={
-        #   '/home/pi/ldc_project/ldc_homeserver/history/':'pi@192.168.1.81:/home/pi/studies/ardmore/homeserver/',
-        #   }, remove_source=False)
-
-      time.sleep(300)
+        sync_files(dict_paths=dict_paths, remove_source=False)
+       
+      time.sleep(60)
     except Exception as e:
-      print("Error:", e)
+      print("Error send_data:", e)
       break
     except KeyboardInterrupt:
       break

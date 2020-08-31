@@ -1,0 +1,1 @@
+{"set_target": "manual", "algorithm": "advanced_ldc", "ranking": "static", "distribution": "per_house", "frequency": "810.1646438269097", "gain": "256", "history": "Last 15 Minutes", "target_watt": "6000.0"}

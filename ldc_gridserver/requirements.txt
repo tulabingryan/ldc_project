@@ -1,0 +1,22 @@
+# required for plotly dash graphs
+dash==0.38.0  # The core dash backend
+dash-html-components==0.13.5  # HTML components
+dash-core-components==0.43.1  # Supercharged components
+dash-table==3.5.0  # Interactive DataTable component (new!)
+dash-daq==0.1.0  # DAQ components (newly open-sourced!)
+dash-auth  # authentication for dash users
+plotly #--upgrade  # Latest Plotly graphing library
+colorlover # to get color library for plotting
+
+gunicorn
+numpy
+pandas
+scipy
+flask
+flask_caching
+flask-wtf
+flask-sqlalchemy
+flask-bcrypt
+flask-login
+geocoder
+pyserial

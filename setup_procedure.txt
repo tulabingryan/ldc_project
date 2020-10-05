@@ -6,8 +6,17 @@
 # Copy the folder "ldc_project" to /home/pi/
 scp -r ldc_project pi@192.168.1.2:/home/pi/  # where 192.168.1.2 is the ip address of the pi
 # enter the password for the user pi:
-raspberry
+ldc
 # wait until all files are sent to the raspberry pi
+
+### static ip
+sudo nano /etc/dhcpcd.conf
+# add the following lines to the file
+ssid SPARK-EVS5UK
+static ip_address=192.168.1.1/24
+static domain_name_servers=192.168.1.254
+static routers=192.168.1.254
+
 
 # Install berryconda3
 ssh pi@192.168.1.2

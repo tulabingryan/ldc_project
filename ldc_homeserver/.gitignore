@@ -1,0 +1,6 @@
+# ignore following files
+*.db*
+dict_cmd.txt
+history/
+logs/
+__pycache__/

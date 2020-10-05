@@ -48,22 +48,16 @@ class EnergyMeter():
         self.mcast_ip = '224.0.2.0'
         self.mcast_port = 17000
         # tcp_client.tcpClient.__init__(self, '192.168.1.81', 10081)
-        self.dict_history = {}
+        self.df_history = pd.DataFrame([])
         self.df_data = pd.DataFrame([])
         # initialize dictionary for data
         self.dict_data = {'unixtime': int(time.time())}
         self.dict_states_self = {str(self.name):self.dict_data}
-        self.minute = 0
+
         self.dict_registers = {
-            'voltage': [40306, 1], 
-            'frequency':[40305, 1], 
-            'current':[40314, 2], 
-            'powerfactor':[40345, 1],
-            'power_active':[40321, 2], 
-            'power_reactive':[40329, 2], 
-            'power_apparent':[40337, 2], 
-            'energy_active':[((440961 - 400001) + 40001), 2], 
-            'energy_reactive':[((440991 - 400001) + 40001), 2],
+            'voltage': [40306, 1], 'frequency':[40305, 1], 'current':[40314, 2], 'powerfactor':[40345, 1],
+            'power_active':[40321, 2], 'power_reactive':[40329, 2], 'power_apparent':[40337, 2], 
+            'energy_active':[((440961 - 400001) + 40001), 2], 'energy_reactive':[((440991 - 400001) + 40001), 2],
             }
    
         self.dict_modbus = self.create_query_dictionary()
@@ -105,32 +99,27 @@ class EnergyMeter():
         except Exception as e:
             print("Error connect_serial:", e)
     
-    def get_meter_data(self, report=False, 
-        params=['voltage', 'current', 'powerfactor', 'frequency', 'power_active', 'power_reactive']):
-        'read power meter and save'
+    def get_meter_data(self, report=False, params=['voltage', 'current', 'powerfactor', 'frequency',
+        'power_active', 'power_reactive', 'power_apparent', 'energy_active', 'energy_reactive']):
+        # read power meter, update dict_data, and put into q_data
         try:
-            now = datetime.datetime.now()
-            
+            last_unixtime = self.dict_data['unixtime']
+            weight_present = 0.05
             ### query states of other devices, and consolidate in dict_data
-            peer_states = MULTICAST.send(dict_msg={'states':'all'}, ip='224.0.2.0', port=17000, timeout=0.3, hops=1)
-            
-            for k, v in peer_states.items():
-                self.dict_data.update(v)
+            self.dict_data = MULTICAST.send(dict_msg={'states':'all'}, ip='224.0.2.0', port=17000, timeout=0.5, hops=1)
+            self.dict_data.update({
+                    "unixtime": int(np.round(time.time(), 0))
+                })
 
             for param in params:
                 self.dict_data.update(self.read_meter(param))
-
-
+                
             ### convert to dict_data to pandas dataframe
-            # self.df_data = pd.DataFrame.from_dict(self.dict_data, orient='index').T
+            self.df_data = pd.DataFrame.from_dict(self.dict_data, orient='index').T
 
             ### save data to disk
-            # df_agg = pd.melt(self.df_data.astype(str), id_vars=["unixtime"], var_name="parameter", value_name="value")
-            
-            self.dict_data.update({"unixtime": int(now.timestamp()) })
-            self.dict_history.update({int(now.timestamp()): self.dict_data})            
-            self.dict_history = self.pickle_data(dict_data=self.dict_history, path=f'/home/pi/ldc_project/history/{self.house}_{now.strftime("%Y_%m_%d")}.pkl.xz')
-            # self.save_data(df_agg)
+            df_agg = pd.melt(self.df_data.astype(str), id_vars=["unixtime"], var_name="parameter", value_name="value")
+            self.save_data(df_agg)
             if report: print(self.dict_data)
 
             return self.dict_data
@@ -178,27 +167,6 @@ class EnergyMeter():
 
         except Exception as e:
             print("Error in save_data:", e)
-
-
-    def pickle_data(self, dict_data, path='history/data.pkl'):
-        'Save data as pickle file.'
-        try:
-            df_all = pd.DataFrame.from_dict(dict_data, orient='index').reset_index(drop=True).astype(float)
-            try:
-                on_disk = pd.read_pickle(path, compression='infer').reset_index(drop=True)
-                df_all = pd.concat([on_disk, df_all], axis=0, sort=False).reset_index(drop=True)
-                df_all = df_all.groupby('unixtime').mean().reset_index(drop=False)
-                df_all['unixtime'] = df_all['unixtime'].astype(int)
-                df_all.to_pickle(path, compression='infer')
-            except Exception as e:
-                df_all.to_pickle(path)
-            
-            return {}
-        except Exception as e:
-            print("Error METER.pickle_data:", e)
-            return dict_data 
-
-
 
          
 

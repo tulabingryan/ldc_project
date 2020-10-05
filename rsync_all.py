@@ -63,7 +63,7 @@ def main():
   elif groups[0]==10:
     target_hosts.extend(['10.10.10.168'])
   elif groups[0] in [12,13,14,15]:
-    target_hosts = ['192.168.1.3']
+    target_hosts = []
     groups.extend([14,15])
     groups = np.unique(groups)
     target_hosts.extend(['192.168.{}.{}'.format(x,y) for y in range(100, 114) for x in groups])

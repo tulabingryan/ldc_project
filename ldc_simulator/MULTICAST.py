@@ -20,7 +20,7 @@ import ast
 
 
 
-def send(dict_msg={'sample':'test'}, ip='224.0.2.0', port=17000, timeout=0.5, data_bytes=4096, hops=1):
+def send(dict_msg={'sample':'test'}, ip='224.0.2.0', port=17000, timeout=0.5, data_bytes=2048, hops=1):
     # send multicast query to listening devices
     address_port=(ip, port)
     # Create the datagram socket
@@ -40,22 +40,21 @@ def send(dict_msg={'sample':'test'}, ip='224.0.2.0', port=17000, timeout=0.5, da
 
     try:
         # Send data to the multicast group 
-        message = str(dict_msg).encode("utf-8")
+        message = str(dict_msg).encode()
         sent = sock.sendto(message, address_port)
         # Look for responses from all recipients
         while True:
             try:
                 data, address = sock.recvfrom(data_bytes)
-                if data:
-                    m = data.decode("utf-8")
-                    msg_received = ast.literal_eval(m)
-                    dict_received.update({address[0]:msg_received})
+                m = data.decode("utf-8")
+                msg_received = ast.literal_eval(m)
+                dict_received.update({address[0]:msg_received})
                 
             except socket.timeout:
                 break
             except Exception as e:
                 print(f'Error MULTICAST send response loop:{e}')
-    
+            
     except Exception as e:
         print("Error in MULTICAST send", e)
         pass
@@ -81,7 +80,7 @@ def receive(ip='224.0.2.0', port=17000):
 
     # Create the socket
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    
+
     # Bind to the server address
     sock.bind(multicast_group)
 
@@ -99,20 +98,19 @@ def receive(ip='224.0.2.0', port=17000):
         try:
             print('\nwaiting to receive message')
             data, address = sock.recvfrom(1024)          
+
             print('sending acknowledgement to', address)
             sock.sendto(data, address)            
 
             message = data.decode("utf-8")
             dict_msg = ast.literal_eval(message)
+            print(dict_msg)
             
-        except socket.timeout:
-            print('timeout')
+            
         except KeyboardInterrupt:
             break
         except Exception as e:
             print(f'Error:{e}')
-            
-
         
         
 

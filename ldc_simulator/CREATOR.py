@@ -833,8 +833,8 @@ def create_heatpumpSpecs(n_heatpumps, ldc_adoption, df_houseSpecs, renew=False, 
                 df_heatpumpSpecs['irradiance_wall3'] = 0
                 df_heatpumpSpecs['irradiance_wall4'] = 0
                 
-                df_heatpumpSpecs['counter'] = np.random.uniform(0, 60, n_heatpumps)
-                df_heatpumpSpecs['min_cycletime']= np.random.uniform(30, 60, n_heatpumps)
+                df_heatpumpSpecs['counter'] = np.random.uniform(0, 120, n_heatpumps)
+                df_heatpumpSpecs['min_cycletime']= np.random.uniform(30, 120, n_heatpumps)
                 df_heatpumpSpecs['min_coolingtime']= np.random.uniform(30, 60, n_heatpumps)
                 df_heatpumpSpecs['min_heatingtime']= np.random.uniform(30, 60, n_heatpumps)
                 
@@ -1326,10 +1326,10 @@ def create_heaterSpecs(n_heaters, ldc_adoption, df_houseSpecs, renew=False, repo
                 df_heaterSpecs['irradiance_wall3'] = 0
                 df_heaterSpecs['irradiance_wall4'] = 0
                 
-                df_heaterSpecs['counter'] = np.random.uniform(0, 5, n_heaters)
-                df_heaterSpecs['min_cycletime']= np.random.uniform(2, 5, n_heaters)
-                df_heaterSpecs['min_coolingtime']= np.random.uniform(2, 5, n_heaters)
-                df_heaterSpecs['min_heatingtime']= np.random.uniform(2, 5, n_heaters)
+                df_heaterSpecs['counter'] = np.random.uniform(0, 10, n_heaters)
+                df_heaterSpecs['min_cycletime']= np.random.uniform(3, 5, n_heaters)
+                df_heaterSpecs['min_coolingtime']= np.random.uniform(3, 5, n_heaters)
+                df_heaterSpecs['min_heatingtime']= np.random.uniform(3, 5, n_heaters)
                 
                 df_heaterSpecs['min_chargingtime'] = 5
                 df_heaterSpecs['min_dischargingtime'] = 5
@@ -1531,8 +1531,8 @@ def create_waterheaterSpecs(n_waterheaters, ldc_adoption, df_houseSpecs, renew=F
             df_waterheaterSpecs['irradiance_wall3'] = 0
             df_waterheaterSpecs['irradiance_wall4'] = 0
             
-            df_waterheaterSpecs['counter'] = np.random.uniform(0, 5, n_waterheaters)
-            df_waterheaterSpecs['min_cycletime'] = np.random.uniform(2, 5, n_waterheaters) 
+            df_waterheaterSpecs['counter'] = np.random.uniform(0, 10, n_waterheaters)
+            df_waterheaterSpecs['min_cycletime'] = np.random.uniform(3, 5, n_waterheaters) 
             df_waterheaterSpecs['min_coolingtime'] = np.random.uniform(2, 5, n_waterheaters)
             df_waterheaterSpecs['min_heatingtime'] = np.random.uniform(2, 5, n_waterheaters)
             

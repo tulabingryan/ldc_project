@@ -41,7 +41,7 @@ if __name__ == '__main__':
     parser.add_option('--tcl_control', dest='tcl_control', default='mixed', help='control method of TCLs')
     parser.add_option('--folder', dest='folder', default='/home/pi/studies/results/assorted', help='folder name')
     parser.add_option('--report', dest='report', default=0, help='show data during tests and troubleshooting')
-    parser.add_option('--flex', dest='flex', default=50, help='weight for flexibility-based prioritization')
+    parser.add_option('--flex', dest='flex', default=100, help='weight for flexibility-based prioritization')
     parser.add_option('--study', dest='study', default='None', help='Simulation study')
 
     options, args = parser.parse_args(sys.argv[1:])
@@ -50,11 +50,11 @@ if __name__ == '__main__':
     dict_cases = {0:None, 
                 1:'no_ldc',
                 2:'ripple_control',
-                3:'loading_50', 
-                4:'loading_75', 
-                5:'loading_auto', 
-                6:'per_house',  # adoption 50, target auto
-                7:'per_device', # adoption 50, target auto
+                3:'loading_10', 
+                4:'loading_20', 
+                5:'loading_30', 
+                6:'loading_40',  
+                7:'loading_50', 
                 8:'adoption_10',
                 9:'adoption_20',
                 10:'adoption_30',
@@ -72,7 +72,7 @@ if __name__ == '__main__':
                 22:'resolution_1hz',
                 23:'resolution_10hz',
                 24:'resolution_1uhz',
-                25:'loading_30',
+                25:'loading_auto',
 
                 31:'ideal_direct_k32_tou_step100ms',
                 32:'ideal_direct_k32_tou_step1s',
@@ -137,18 +137,12 @@ if __name__ == '__main__':
                 149:'ideal_setpoint2_k8192_tou',
                 
                 
-                200:'ideal_mixed_no_ldc',
-                201:'ideal_mixed_k16_tou',
-                202:'ideal_mixed_k32_tou',
-                203:'ideal_mixed_k64_tou',
-                204:'ideal_mixed_k128_tou',
-                205:'ideal_mixed_k256_tou',
-                206:'ideal_mixed_k512_tou',
-                207:'ideal_mixed_k1024_tou',
-                208:'ideal_mixed_k2048_tou',
-                209:'ideal_mixed_k90_tou',
-                210:'ideal_mixed_k100_tou',
-                
+                200:'ideal_basic_direct_a0.1_t33',
+                201:'ideal_basic_setpoint_a0.1_t33',
+                202:'ideal_basic_mixed_a0.1_t33',
+                203:'basic_direct_perhouse_a0.1_t33',
+                204:'basic_direct_perdevice_a0.1_t33',
+
                 211:'ideal_mixed2_k10_tou',
                 212:'ideal_mixed2_k20_tou',
                 213:'ideal_mixed2_k30_tou',
@@ -196,9 +190,20 @@ if __name__ == '__main__':
                 285:'advanced_all_k128_auto_d1s_step1s_f50',
                 287:'advanced_all_k128_auto_d1s_step1s_f70',
                 289:'advanced_all_k128_auto_d1s_step1s_f90',
-                290:'advanced_all_k128_auto_f100',
+                290:'advanced_all_k32_t50_f100',
+                291:'advanced_all_k32_auto_f100',
+
+                292:'advanced_all_a0.1_t33_f100',
+                293:'advanced_all_a0.2_t33_f100',
+                294:'advanced_all_a0.5_t33_f100',
+                295:'advanced_all_a2.0_t33_f100',
+                296:'advanced_all_a5.0_t33_f100',
+                297:'advanced_all_a10.0_t33_f100',
                 
-                300:'basic_all_k128_auto'
+                
+
+                300:'basic_all_k32_auto',
+                301:'advanced_all_k32_auto'
 
                 }
 
@@ -213,7 +218,7 @@ if __name__ == '__main__':
                 4:'autumn'}
     dict_season_week = {'summer':3, 
                 'autumn':16, 
-                'winter':29, 
+                'winter': 29, 
                 'spring':42}
     dict_network = {0:'lv_1', 
                 1:'lv_5', 
@@ -290,7 +295,7 @@ if __name__ == '__main__':
         latitude = '-36.866590076725494'
         longitude = '174.77534779638677'
 
-        dt = pd.date_range(start='2019-1-1 00:00:00', end='2020-1-1 00:00').tz_localize('Pacific/Auckland')
+        dt = pd.date_range(start='2020-1-1 00:00:00', end='2021-1-1 00:00').tz_localize('Pacific/Auckland')
         dt_start = [a for a in dt if a.week==dict_season_week[season]][1]  # week in the middle of season
         start = dt_start.timestamp()
         devices_to_simulate = ['house', 'baseload', 
@@ -300,7 +305,32 @@ if __name__ == '__main__':
             # 'solar', 'wind'                                           # local generation
             ]
 
-        if study=='hierarchy':
+        if study=='tcl_control':
+            n_ldc = float(options.a)
+            dict_devices = {k:{'n_units':int(n_units*app_per_house[k]), 'n_ldc':0} for k in devices_to_simulate}
+            dict_devices['heatpump']['n_ldc'] = int(n_units*n_ldc*app_per_house['heatpump'])
+            dict_devices['fridge']['n_ldc'] = int(n_units*n_ldc*app_per_house['fridge'])
+            dict_devices['freezer']['n_ldc'] = int(n_units*n_ldc*app_per_house['freezer'])
+            dict_devices['heater']['n_ldc'] = int(n_units*n_ldc*app_per_house['heater'])
+            dict_devices['waterheater']['n_ldc'] = int(n_units*n_ldc*app_per_house['waterheater'])
+            print('Running setup...')
+            for k, v in dict_devices.items(): print(k, v)
+            print(f'timestamp:{start}')
+            print(f'latitude:{latitude}')
+            print(f'longitude:{longitude}')
+            print(f'profile index:{start_idx}')
+            print(f'device_ip:{device_ip}')
+            print(f'case:{case}')
+            print(f'season:{season}')  
+            local_ip = get_local_ip()          
+            A = Aggregator(dict_devices, timestamp=start, latitude=latitude, longitude=longitude, 
+                idx=start_idx, local_ip=local_ip, device_ip=device_ip, step_size=step_size, simulation=simulation, 
+                endstamp=start+int(ndays*3600*24)-1, case=case, network=network, casefolder=casefolder, 
+                algorithm=algorithm, target=target, distribution=distribution, ranking=ranking, 
+                resolution=resolution, ki=ki, tcl_control=tcl_control, delay=delay, report=report, 
+                flex_percent=flex_percent, summary=True)
+        
+        elif study=='hierarchy':
             ldc_loads = {
                 "wh":["waterheater"], 
                 "hp":["heatpump"], 
@@ -314,7 +344,7 @@ if __name__ == '__main__':
 
             load_combinations = {}
             # simulate cases for all and combinations of 4
-            for i in range(1, len(ldc_loads)+1):
+            for i in range(0, len(ldc_loads)+1):
                 comb = itertools.combinations(ldc_loads, i)
                 for c in list(comb):
                     key = "_".join(np.sort(np.unique(c)))

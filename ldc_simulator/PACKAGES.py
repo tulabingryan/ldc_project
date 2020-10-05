@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import datetime, time
 import threading, queue, multiprocessing
-import itertools
+
 # for multicast
 import socket, struct, sys, json, ast
 import MULTICAST

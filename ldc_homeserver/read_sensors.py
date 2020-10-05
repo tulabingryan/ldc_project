@@ -91,10 +91,7 @@ def get_data(ser, report=False, save=False):
         try:
             now = datetime.datetime.now()
             dt = now.strftime('%Y-%m-%d %H:%M')
-            unixtime = now.timestamp()
-            today = now.strftime('%Y_%m_%d')
             
-
             b = ser.read(18)
             
             if b:
@@ -110,6 +107,7 @@ def get_data(ser, report=False, save=False):
                         light = (((b[16] & 0xFF) << 8) + (b[17] & 0xFF)) * 16
                         )
                     dict_hist.update({dict_data['source_node_id']:{
+                        'date_time':dict_data['date_time'],
                         'unixtime':now.strftime('%s'),
                         'location':df_location.loc[dict_data['source_node_id'],'location'],
                         'temperature':dict_data['temperature'],

@@ -1,1 +1,1 @@
-{"set_target": "manual", "algorithm": "advanced_ldc", "ranking": "static", "distribution": "per_house", "frequency": "810.1646438269097", "gain": "256", "history": "Last 15 Minutes", "target_watt": "6000.0"}
+{"set_target": "auto", "algorithm": "advanced_ldc", "ranking": "static", "distribution": "per_house", "frequency": "835.9302361266757", "gain": "32", "history": "Last 2 Hours", "target_watt": "5444.68138888889"}

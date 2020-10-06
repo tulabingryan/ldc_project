@@ -116,9 +116,6 @@ class TcpServer(multiprocessing.Process):
                     self.dict_injector.update(new_data)
                     d.update({datetime.datetime.now():new_data})
                     
-                    if len(d.keys())>100:
-                        d = self.save_hdf(dict_data=d)
-                
                 time.sleep(self.pause)
             except Exception as e:
                 print("Error tcp_server.collect_data_injector:", e)

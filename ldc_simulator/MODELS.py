@@ -1464,7 +1464,7 @@ def ldc_dongle(states, common):
                 #     priority = swap_priority(states['priority'])
                 # else:
                 #     priority = states['priority']
-                cdiv = 1
+                cdiv = 59
                 # priority = spread(states['flexibility']*100)
             ### change actual_status
             if states['load_type'][0] in ['clothesdryer', 'clotheswasher', 'dishwasher']:

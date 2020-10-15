@@ -138,49 +138,7 @@ class DataLogger(multiprocessing.Process):
             return
 
 
-    def collect_data_sensors(self, report=False):
-        print("Collecting data from sensors...")
-        df_location = pd.read_csv('sensors_location.csv').set_index('node_id')
-        dict_hist = {}  # temporary holder
-        while self.dict_common['is_alive']:
-            try:
-                ### query env_sensors
-                dict_ports = self.get_ports(report=False)
-                ser = self.connect_serial(port=dict_ports['PID=0483'])
-                now = datetime.datetime.now()
-                dt = now.strftime('%Y-%m-%d %H:%M')
-                b = ser.read(18)
-                if b:
-                    if((b[0] & 0xFF) == 0xAA):
-                        dict_data = dict(
-                            date_time=dt,
-                            dest_group_id = b[7] & 0xFF,
-                            dest_node_id = b[8] & 0xFF,
-                            source_group_id = b[9] & 0xFF,
-                            source_node_id = b[10] & 0xFF,
-                            temperature = (b[12] & 0xFF) + (b[13] & 0xFF) / 100,
-                            humidity = (b[14] & 0xFF) + (b[15] & 0xFF) / 100,
-                            light = (((b[16] & 0xFF) << 8) + (b[17] & 0xFF)) * 16
-                            )
-
-                        location = df_location.loc[dict_data['source_node_id'],'location']
-                        group = df_location.loc[dict_data['source_node_id'],'group']
-                        if group!='xxxx':
-                            self.dict_sensors.update({str(dict_data['source_node_id']):{
-                                'group': group,
-                                'location': location,
-                                'temperature':dict_data['temperature'],
-                                'humidity':dict_data['humidity'],
-                                'light':dict_data['light'],
-                                }})
-                        
-                time.sleep(1)
-            except Exception as e:
-                if report: print(f"Error data_logger.query_sensors:{e}")
-            except BrokenPipeError:
-                break 
-            except KeyboardInterrupt:
-                break
+    
 
 
     def collect_data_dongles(self, report=False):

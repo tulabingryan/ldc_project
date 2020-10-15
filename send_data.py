@@ -3,6 +3,7 @@ import sys
 import glob
 import socket
 import numpy as np
+import pandas as pd
 import time, datetime
 from optparse import OptionParser
 # Note: this code requires sshpass
@@ -25,7 +26,20 @@ def delete_old(path='*.*', n_retain=1):
         os.system(cmd)
 
 
-def sync_files(dict_paths, remove_source=False, options='-auzhe'):
+def compress_pickle(path):
+    '''
+    Convert feather file to pkl.xz to reduce size 
+    '''
+    try:
+        df_all = pd.read_pickle(path, compression='infer')
+        df_all.to_pickle(f'{path}.xz', compression='infer')
+        # print(f'converted:{path}')
+    except Exception as e:
+        print("Error compress_pickle:", e)
+        
+
+
+def sync_files(dict_paths, remove_source=False, options='-auhe'):
     '''
     -v, –verbose                             Verbose output
     -q, –quiet                                  suppress message output
@@ -45,9 +59,10 @@ def sync_files(dict_paths, remove_source=False, options='-auzhe'):
             if remove_source:
                 os.system(f'sshpass -p "ldc" rsync {options} ssh --remove-source-files {from_path} {to_path}') 
             else:
-                os.system(f'sshpass -p "ldc" rsync {options} ssh -T /home/pi --append-verify {from_path} {to_path}')
+                os.system(f'sshpass -p "ldc" rsync {options} ssh -T /home/pi --exclude-from ".send_data-exluded" {from_path} {to_path}')
         except Exception as e:
             print("Error:", e, from_path, to_path)
+
             
 
 def get_local_ip(report=False):
@@ -79,36 +94,45 @@ def main():
                 'pi@192.168.1.81:/home/pi/ldc_project/ldc_gridserver/dict_cmd.txt': '/home/pi/ldc_project/ldc_simulator/dict_cmd.txt',
                 }
 
-    interval = 5
+    interval = 1
 
     if not options.n:
         print(f'sending files quitely every {interval}s...')
         for from_path, to_path in dict_paths.items():
             print(f'    {from_path} ---> {to_path}')
 
+    last_edit = time.time()
     while True:
         try:
             local_ip = get_local_ip()  # ensures network connection
-            dt = datetime.datetime.now().timetuple()
-    
+            now = datetime.datetime.now()
+            dt = now.timetuple()
+            today = now.strftime('%Y_%m_%d')
+            
+            ### convert 
             if options.n:
                 print("sending files now...")
                 sync_files(dict_paths={
                     '/home/pi/ldc_project/history/':'pi@192.168.1.81:/home/pi/studies/ardmore/data/',
                     '/home/pi/ldc_project/logs/':'pi@192.168.1.81:/home/pi/studies/ardmore/logs/',
                     '/home/pi/ldc_project/ldc_homeserver/history/':'pi@192.168.1.81:/home/pi/studies/ardmore/homeserver/',
-                    }, options='-avuzhe', remove_source=False)
+                    }, options='-avuhe', remove_source=False)
             elif ((dt.tm_hour==23) and (dt.tm_min>=55)):
                 delete_old('/home/pi/ldc_project/logs/*', n_retain=0)
                 delete_old('/home/pi/ldc_project/history/*', n_retain=5)
                 delete_old('/home/pi/ldc_project/ldc_homeserver/history/*', n_retain=5)
             else:
+                for p in glob.glob(f'/home/pi/ldc_project/history/*{today}.pkl'):
+                    if os.stat(p).st_mtime > last_edit:
+                        last_edit = os.stat(p).st_mtime
+                        compress_pickle(p)
+                
                 sync_files(dict_paths=dict_paths, remove_source=False)
+
              
             time.sleep(interval)
         except Exception as e:
             print("Error send_data:", e)
-            break
         except KeyboardInterrupt:
             break
 

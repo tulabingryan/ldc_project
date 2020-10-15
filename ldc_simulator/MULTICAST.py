@@ -20,7 +20,7 @@ import ast
 
 
 
-def send(dict_msg={'sample':'test'}, ip='224.0.2.0', port=17000, timeout=0.5, data_bytes=2048, hops=1):
+def send(dict_msg={'sample':'test'}, ip='224.0.2.0', port=17000, timeout=0.5, data_bytes=8192, hops=1):
     # send multicast query to listening devices
     address_port=(ip, port)
     # Create the datagram socket

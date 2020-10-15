@@ -445,6 +445,7 @@ class Aggregator(object):
                             elif key in ['injector']:
                                 self.dict_common.update(self.dict_agg['injector'])
 
+
                     # ### door
                     # if self.pipe_agg_door0.poll():
                     #   dev_state = self.pipe_agg_door0.recv()
@@ -870,10 +871,11 @@ class Aggregator(object):
                     import SENSIBO
                     dict_a_mode = {'cool':0, 'heat':1, 'fan':2, 'dry':3, 'auto':4}  # actual mode
                     self.sensibo_api = SENSIBO.SensiboClientAPI('srBysNj0K9o6De9acaSz8wrvS2Qpju')
-                    devices = self.sensibo_api.devices()
-                    self.uid = devices['ldc_heatpump_h{}'.format(int(self.house_num))]
+                    self.sensibo_devices = self.sensibo_api.devices()
+                    self.uid = self.sensibo_devices[f'ldc_heatpump_h{int(self.house_num)}']
                     self.sensibo_state = self.sensibo_api.pod_ac_state(self.uid)
-                    self.sensibo_history = self.sensibo_api.pod_history(self.uid)
+                    # self.sensibo_history = self.sensibo_api.pod_history(self.uid)
+                    self.sensibo_measurement = self.sensibo_api.pod_measurement(self.uid)
                     break
                 except Exception as e:
                     print(f"Error AGGREGATOR.heatpump.setup_sensibo:{e}")
@@ -1000,13 +1002,11 @@ class Aggregator(object):
                     self.dict_heatpump['charging_counter'] = np.subtract(self.dict_heatpump['charging_counter'], self.dict_common['step_size'])
                     if self.dict_common['second']%30==0:
                         try:
-                            self.sensibo_api = SENSIBO.SensiboClientAPI('srBysNj0K9o6De9acaSz8wrvS2Qpju')
-                            devices = self.sensibo_api.devices()
-                            self.uid = devices['ldc_heatpump_h{}'.format(int(self.house_num))]
+                            ### query sensibo state and history
                             self.sensibo_state = self.sensibo_api.pod_ac_state(self.uid)
-                            self.sensibo_history = self.sensibo_api.pod_history(self.uid)
-                            self.sensibo_state = self.sensibo_api.pod_ac_state(self.uid)
-                            self.sensibo_history = self.sensibo_api.pod_history(self.uid)
+                            # self.sensibo_history = self.sensibo_api.pod_history(self.uid)
+                            self.sensibo_measurement = self.sensibo_api.pod_measurement(self.uid)
+                            
                             ### Actions
                             self.dict_heatpump['connected'] = np.ones(n_units)  ### ardmore heatpumps are always ON
                             # print(self.sensibo_state, self.dict_heatpump['temp_max'], self.dict_heatpump['temp_min'], self.dict_heatpump['tolerance'], self.dict_heatpump['temp_target'])
@@ -1027,13 +1027,17 @@ class Aggregator(object):
                                     self.sensibo_api.pod_change_ac_state(self.uid, self.sensibo_state, "targetTemperature", int(self.dict_heatpump['temp_target'][0]))
                         except Exception as e:
                             print(f"Error AGGREGATOR.heatpump.sensibo_operation:{e}")
-
+                            ### reconnect to sensibo database
+                            self.sensibo_api = SENSIBO.SensiboClientAPI('srBysNj0K9o6De9acaSz8wrvS2Qpju')
+                            self.sensibo_devices = self.sensibo_api.devices()
+                            self.uid = self.sensibo_devices[f'ldc_heatpump_h{int(self.house_num)}']
+                            
                     ### update device states, e.g., temp_in, temp_mat, actual reading
-                    self.dict_heatpump['temp_in'] = np.array([self.sensibo_history['temperature'][-1]['value']])
-                    self.dict_heatpump['temp_mat'] = np.array([self.sensibo_history['temperature'][-1]['value']])
-                    self.dict_heatpump['temp_in_active'] = np.array([self.sensibo_history['temperature'][-1]['value']])
+                    self.dict_heatpump['temp_in'] = np.array([self.sensibo_measurement[0]['temperature']])
+                    self.dict_heatpump['temp_mat'] = np.array([self.sensibo_measurement[0]['temperature']])
+                    self.dict_heatpump['temp_in_active'] = np.array([self.sensibo_measurement[0]['temperature']])
                     ### indoor humidity (actual reading)
-                    self.dict_heatpump['humidity_in'] = np.array([self.sensibo_history['humidity'][-1]['value']])
+                    self.dict_heatpump['humidity_in'] = np.array([self.sensibo_measurement[0]['humidity']])
                     ### additional data
                     # self.dict_heatpump['mode'] = np.array([dict_a_mode[self.sensibo_state['mode']]])
                     # self.dict_heatpump['temp_target'] = np.array([self.sensibo_state['targetTemperature']])
@@ -2397,9 +2401,11 @@ class Aggregator(object):
             GPIO.setwarnings(False)
             self.pins = [0,0,0,0,0,0,0,0]
             self.pf = pifacedigitalio.PiFaceDigital()
-            
-            dict_agg = {}
             self.df_relay, self.df_states = FUNCTIONS.create_states(report=False)  # create power levels based on resistor bank
+            
+            self.dict_history = {}
+            dict_agg = {}
+            last_day = datetime.datetime.now().strftime("%Y_%m_%d")
             while True:
                 try:
                     ### get data from local process
@@ -2409,11 +2415,31 @@ class Aggregator(object):
                     if self.dict_common['is_alive']==False: 
                         raise KeyboardInterrupt
                     
-                    self.dict_summary_demand = dict_agg['summary']['demand']
+                    self.dict_summary_demand = {} #dict_agg['summary']['demand']
+
                     ### get data from network devices
-                    peer_demand = MULTICAST.send(dict_msg={"summary":"demand"}, ip='224.0.2.0', port=17000, timeout=0.3, hops=1)
-                    for k, v in peer_demand.items(): 
-                        self.dict_summary_demand.update(v)
+                    # peer_demand = MULTICAST.send(dict_msg={"summary":"demand"}, ip='224.0.2.0', port=17000, timeout=0.3, hops=1)
+                    # for k, v in peer_demand.items(): 
+                    #     self.dict_summary_demand.update(v)
+
+                    ### get peer states
+                    peer_states = MULTICAST.send(dict_msg={'states':'all'}, ip='224.0.2.0', port=17000, timeout=0.3, data_bytes=65536, hops=1)
+                    for address, state in peer_states.items():
+                        self.dict_state.update(state)
+                        for k, v in state.items():
+                            if k.endswith('actual_demand'):
+                                self.dict_summary_demand.update({k:float(v)})
+
+                    ### save all states
+                    self.dict_state.update({"unixtime": self.dict_common['unixtime'] })
+                    self.dict_history.update({self.dict_common['unixtime']: self.dict_state})            
+                    self.dict_history = self.save_pickle(dict_data=self.dict_history, path=f'/home/pi/ldc_project/history/H{self.house_num}_{self.dict_common["today"]}.pkl')
+                    ### compress saved data at start of new day
+                    if self.dict_common['today']!=last_day:
+                        self.compress_pickle(path=f'/home/pi/ldc_project/history/H{self.house_num}_{last_day}.pkl')
+                    last_day = self.dict_common['today']
+
+
                     ### add all demand except heatpump and waterheater demand
                     total = np.sum([np.sum(self.dict_summary_demand[k]) for k in self.dict_summary_demand.keys() if not (k.startswith('heatpump') or k.startswith('waterheater'))])
                     total = min([total, 10e3]) #limit to 10kW
@@ -2456,25 +2482,45 @@ class Aggregator(object):
                         self.pf.output_pins[i].turn_off()
                     break
                 except Exception as e:
-                    print("Error drive_grainy:", e, total, grainy, chroma, self.dict_summary_demand)
+                    print("Error drive_grainy:", e)
+                    self.pipe_agg_grainy1.send({})
         except Exception as e:
             print("Error setting up piface:{}".format(e))
         
 
-    def pickle_data(self, dict_data, path='history/data.pkl'):
+
+    @staticmethod
+    def save_pickle(dict_data, path='history/data.pkl.xz'):
         'Save data as pickle file.'
         try:
             df_all = pd.DataFrame.from_dict(dict_data, orient='index').reset_index(drop=True).astype(float)
             try:
-                on_disk = pd.read_pickle(path).reset_index(drop=True)
-                df_all = pd.concat([on_disk, df_all], axis=0).groupby('unixtime').mean().reset_index(drop=False)
-                df_all.to_pickle(path)
+                on_disk = pd.read_pickle(path, compression='infer').reset_index(drop=True)
+                df_all = pd.concat([on_disk, df_all], axis=0, sort=False).reset_index(drop=True)
+                df_all['unixtime'] = df_all['unixtime'].astype(int)
+                df_all = df_all.groupby('unixtime').mean().reset_index(drop=False)
+                df_all.to_pickle(path, compression='infer')
             except Exception as e:
-                df_all.to_pickle(path)
+                df_all.to_pickle(path, compression='infer')
+            
             return {}
         except Exception as e:
-            print("Error METER.pickle_data:", e)
+            print("Error save_pickle:", e)
             return dict_data 
+
+    @staticmethod
+    def compress_pickle(path):
+        '''
+        Convert feather file to pkl.xz to reduce size 
+        '''
+        try:
+            df_all = pd.read_pickle(path, compression='infer').reset_index(drop=True)
+            df_all.to_pickle(f'{path}.xz', compression='infer')
+            # if not df_all.empty:
+            #     os.remove(path)
+        except Exception as e:
+            print("Error compress_pickle:", e)
+            
 
 
     def meter(self):
@@ -2482,6 +2528,7 @@ class Aggregator(object):
         EM1 =  EnergyMeter(house=f'H{self.house_num}', IDs=[0])
         self.dict_meter = {}
         dict_history = {}
+        # last_day = datetime.datetime.now().strftime("%Y_%m_%d")
         while True:
             try:
                 dict_agg = self.pipe_agg_meter1.recv()
@@ -2492,7 +2539,11 @@ class Aggregator(object):
                 ### get meter data
                 self.dict_meter.update(EM1.get_meter_data(report=self.report))  # NOTE: this step also pickles the data to disk
                 self.pipe_agg_meter1.send({'meter': self.dict_meter})
-                
+
+                # ### compress file
+                # if self.dict_common['today']!=last_day:
+                #     self.compress_pickle(path=f'/home/pi/ldc_project/history/H{self.house_num}_{last_day}.pkl')
+                # last_day = self.dict_common['today']
                 time.sleep(self.pause)
             except KeyboardInterrupt:
                 print("meter stopped...")
@@ -2539,12 +2590,16 @@ class Aggregator(object):
                         self.pipe_agg_udp1.send({'multicast': msg_in})
                         self.dict_agg = self.pipe_agg_udp1.recv()
 
-                    if len(self.dict_agg.keys())==0: continue
+                    if len(self.dict_agg.keys())==0: 
+                        continue
 
                     self.dict_common.update(self.dict_agg['common'])
+
                     if self.dict_common['is_alive']==False: 
                         raise KeyboardInterrupt
                     
+
+                    ### interpret packet and respond
                     dict_msg = json.loads(msg_in)
                     rcv_keys = dict_msg.keys()
                     agg_keys = self.dict_agg.keys()

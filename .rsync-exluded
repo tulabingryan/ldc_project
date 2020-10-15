@@ -1,5 +1,6 @@
 history
 logs
+**.git
 **config_self.json**
 **__pycache__**
 **ldc_agg_melted.db**

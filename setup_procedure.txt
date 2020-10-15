@@ -169,3 +169,5 @@ sudo nano ~/.profile
 # add at the end of the line
 path=/home/pi/berryconda3/bin:$PATH
 
+### install sshpass to enable sending of files through ssh using python code
+sudo apt-get install sshpass

@@ -189,6 +189,7 @@ class Aggregator(object):
         
 
     def add_device(self, dict_new_devices):
+        print("Adding devices...")
         self.factor = 1
         for load_type in dict_new_devices.keys():
             n_units = dict_new_devices[load_type]['n_units']  # new devices
@@ -223,6 +224,7 @@ class Aggregator(object):
 
 
     def autorun(self):
+        print("Running autorun...")
         ### run common threads
         self.list_processes = [] 
         self.common_observer = []
@@ -232,32 +234,32 @@ class Aggregator(object):
         # create separate list_processes for each type of appliance
         for k in self.loads_to_run:
             if self.dict_devices[k]['n_units']:
-                eval('self.list_processes.append(multiprocessing.Process(target=self.{}, args=()))'.format(k))
+                eval(f'self.list_processes.append(multiprocessing.Process(target=self.{k}, args=(), name="{k}"))')
                 eval(f'self.load_pipes.append(self.pipe_agg_{k}0)')
         
         if self.simulation==1:
-            self.list_processes.append(multiprocessing.Process(target=self.network, args=()))
+            self.list_processes.append(multiprocessing.Process(target=self.network, args=(), name='network'))
         else:   
             ### threading is used in raspi implementation since only one processor is available
-            self.list_processes.append(multiprocessing.Process(target=self.udp_server, args=()))
-            self.list_processes.append(multiprocessing.Process(target=self.multicast_server, args=()))
-            self.list_processes.append(multiprocessing.Process(target=self.ldc_listener, args=()))
+            self.list_processes.append(multiprocessing.Process(target=self.udp_server, args=(), name='udp_server'))
+            self.list_processes.append(multiprocessing.Process(target=self.multicast_server, args=(), name='multicast_server'))
+            self.list_processes.append(multiprocessing.Process(target=self.ldc_listener, args=(), name='ldc_listener'))
             self.agg_observer.extend([self.pipe_agg_listener0, self.pipe_agg_multicast0, self.pipe_agg_udp0])
 
             if self.device_ip==100:
-                self.list_processes.append(multiprocessing.Process(target=self.drive_grainy, args=()))
+                self.list_processes.append(multiprocessing.Process(target=self.drive_grainy, args=(), name='drive_grainy'))
                 self.agg_observer.append(self.pipe_agg_grainy0)
             if self.device_ip==101:
-                self.list_processes.append(multiprocessing.Process(target=self.meter, args=()))
+                self.list_processes.append(multiprocessing.Process(target=self.meter, args=(), name='meter'))
                 self.agg_observer.append(self.pipe_agg_meter0)
             if self.device_ip in [113, 114]:
-                self.list_processes.append(multiprocessing.Process(target=self.valve, args=()))
+                self.list_processes.append(multiprocessing.Process(target=self.valve, args=(), name='valve'))
                 self.agg_observer.append(self.pipe_agg_valve0)
             if self.device_ip in [118, 119, 120, 121, 122]:
-                self.list_processes.append(multiprocessing.Process(target=self.window, args=()))
+                self.list_processes.append(multiprocessing.Process(target=self.window, args=(), name='window'))
                 self.agg_observer.append(self.pipe_agg_window0)
             if self.device_ip in [123, 124, 125]:
-                self.list_processes.append(multiprocessing.Process(target=self.door, args=()))
+                self.list_processes.append(multiprocessing.Process(target=self.door, args=(), name='door'))
                 self.agg_observer.append(self.pipe_agg_door0)
 
         ### initialize ready pipes
@@ -274,6 +276,7 @@ class Aggregator(object):
         for t in self.list_processes:
             t.daemon = True
             t.start()
+            print(f"Running {t.name}...")
 
         agg_data = {}
         factor = 0.013333  # regression factor to predict percent_loss
@@ -527,7 +530,7 @@ class Aggregator(object):
 
     def network(self):
         '''Model for electrical network'''
-        print("Starting grid simulator...")
+        # print("Starting grid simulator...")
         if self.simulation:
             import pandapower as pp
             import pandapower.networks as nw
@@ -725,7 +728,7 @@ class Aggregator(object):
 
     def ldc_listener(self):
         ''' Get ldc_signal'''
-        print("Running ldc_listener...")
+        # print("Running ldc_listener...")
         ip = '224.0.2.0'
         port = 17000
         timeout = 0.5
@@ -805,7 +808,7 @@ class Aggregator(object):
                 
 
     def baseload(self):
-        print('Running house baseloads...')
+        # print('Running house baseloads...')
         self.dict_baseload = self.dict_house
         df, validity = fetch_baseload(self.dict_common['season'])
         n_units = self.dict_devices['house']['n_units']
@@ -858,7 +861,7 @@ class Aggregator(object):
         
 
     def heatpump(self):
-        print('Running heatpump...')
+        # print('Running heatpump...')
         n_units = self.dict_devices['heatpump']['n_units']
         self.dict_heatpump.update(initialize_load(load_type='heatpump', 
             dict_devices=self.dict_devices,
@@ -873,7 +876,7 @@ class Aggregator(object):
                     self.sensibo_api = SENSIBO.SensiboClientAPI('srBysNj0K9o6De9acaSz8wrvS2Qpju')
                     self.sensibo_devices = self.sensibo_api.devices()
                     self.uid = self.sensibo_devices[f'ldc_heatpump_h{int(self.house_num)}']
-                    self.sensibo_state = self.sensibo_api.pod_ac_state(self.uid)
+                    #self.sensibo_state = self.sensibo_api.pod_ac_state(self.uid)
                     # self.sensibo_history = self.sensibo_api.pod_history(self.uid)
                     self.sensibo_measurement = self.sensibo_api.pod_measurement(self.uid)
                     break
@@ -1068,7 +1071,7 @@ class Aggregator(object):
 
 
     def heater(self):
-        print('Running electric heater...')
+        # print('Running electric heater...')
         self.dict_heater.update(initialize_load(load_type='heater', 
             dict_devices=self.dict_devices,
             dict_house=self.dict_house, 
@@ -1228,7 +1231,7 @@ class Aggregator(object):
         
 
     def waterheater(self):
-        print('Running waterheater...')
+        # print('Running waterheater...')
         self.dict_waterheater.update(initialize_load(load_type='waterheater', 
             dict_devices=self.dict_devices,
             dict_house=self.dict_house, 
@@ -1375,7 +1378,7 @@ class Aggregator(object):
     
 
     def fridge(self):
-        print('Running fridge...')
+        # print('Running fridge...')
         self.dict_fridge.update(initialize_load(load_type='fridge', 
             dict_devices=self.dict_devices,
             dict_house=self.dict_house, 
@@ -1464,7 +1467,7 @@ class Aggregator(object):
 
 
     def freezer(self):
-        print('Running freezer...')
+        # print('Running freezer...')
         dict_save = {}
         self.dict_freezer.update(initialize_load(load_type='freezer', 
             dict_devices=self.dict_devices,
@@ -1552,7 +1555,7 @@ class Aggregator(object):
         
 
     def clotheswasher(self):
-        print('Running clotheswasher...')
+        # print('Running clotheswasher...')
         self.dict_clotheswasher.update(initialize_load(load_type='clotheswasher', 
             dict_devices=self.dict_devices,
             dict_house=self.dict_house, 
@@ -1663,7 +1666,7 @@ class Aggregator(object):
 
 
     def clothesdryer(self):
-        print('Running clothesdryer...')
+        # print('Running clothesdryer...')
         self.dict_clothesdryer.update(initialize_load(load_type='clothesdryer', 
             dict_devices=self.dict_devices,
             dict_house=self.dict_house, 
@@ -1767,7 +1770,7 @@ class Aggregator(object):
 
 
     def dishwasher(self):
-        print('Running dishwasher...')
+        # print('Running dishwasher...')
         self.dict_dishwasher.update(initialize_load(load_type='dishwasher', 
             dict_devices=self.dict_devices,
             dict_house=self.dict_house, 
@@ -1870,7 +1873,7 @@ class Aggregator(object):
 
 
     def ev(self):
-        print('Running electric vehicle model...')
+        # print('Running electric vehicle model...')
         self.dict_ev.update(initialize_load(load_type='ev', 
             dict_devices=self.dict_devices,
             dict_house=self.dict_house, 
@@ -1984,7 +1987,7 @@ class Aggregator(object):
 
 
     def storage(self):
-        print('Running battery storage model...')
+        # print('Running battery storage model...')
         self.dict_storage.update(initialize_load(load_type='storage', 
             dict_devices=self.dict_devices,
             dict_house=self.dict_house, 
@@ -2090,7 +2093,7 @@ class Aggregator(object):
         
 
     def solar(self):
-        print('Running solar panel model...')
+        # print('Running solar panel model...')
         self.dict_solar.update(initialize_load(load_type='solar', 
             dict_devices=self.dict_devices,
             dict_house=self.dict_house, 
@@ -2189,7 +2192,7 @@ class Aggregator(object):
 
 
     def wind(self):
-        print('Running wind turbine model...')
+        # print('Running wind turbine model...')
         self.dict_wind.update(initialize_load(load_type='wind', 
             dict_devices=self.dict_devices,
             dict_house=self.dict_house, 
@@ -2229,7 +2232,7 @@ class Aggregator(object):
 
     def valve(self):
         # opening and closing of water valves
-        print('Emulating valves opening/closing...')
+        # print('Emulating valves opening/closing...')
         while True:
             try:
                 import temper
@@ -2295,7 +2298,7 @@ class Aggregator(object):
 
     def window(self):
         ### this method affects the opening and closing of windows, impacts the air change per hour
-        print('Emulating window opening / closing...')
+        # print('Emulating window opening / closing...')
         while True:
             try:
                 import RPi.GPIO as GPIO
@@ -2342,7 +2345,7 @@ class Aggregator(object):
 
     def door(self):
         ### this method affects the opening and closing of doors, impacts the air change per hour
-        print('Emulating door opening / closing...')
+        # print('Emulating door opening / closing...')
         while True:
             try:
                 import RPi.GPIO as GPIO

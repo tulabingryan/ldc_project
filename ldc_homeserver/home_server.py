@@ -35,7 +35,7 @@ global timezone
 
 
 try:
-    subnet = 4
+    subnet = 1
     dict_data = {}
     date_list = []
     hist_files = glob.glob(f'/home/pi/studies/ardmore/data/H{subnet}*.pkl*')
@@ -287,10 +287,10 @@ def update_graph(json_data):
 
             ### plot individual device demand
             list_minus_wh = [a for a in df_data.columns if (a.lower().endswith('demand') and not (a.lower().startswith('waterheater')) and not (a.lower().startswith('heatpump')))] 
-            df_data['waterheater_actual_demand'] = np.roll(df_data['waterheater_actual_demand'].values, shift=0) * (((df_data['power_kw']>1.7)&(df_data[list_minus_wh].sum(axis=1)<1500))*1)
+            # df_data['waterheater_actual_demand'] = np.roll(df_data['waterheater_actual_demand'].values, shift=0) * (((df_data['power_kw']>1.7)&(df_data[list_minus_wh].sum(axis=1)<1500))*1)
             list_params = [a for a in df_data.columns if a.lower().endswith('demand')]
             list_minus_hp = [a for a in df_data.columns if (a.lower().endswith('demand') and not (a.lower().startswith('heatpump')))]
-            df_data['heatpump_actual_demand'] = np.clip(((df_data['power_kw'] * 1000) - np.roll(df_data[list_minus_hp].sum(axis=1), shift=0))-200, a_min=0, a_max=1500)
+            # df_data['heatpump_actual_demand'] = np.clip(((df_data['power_kw'] * 1000) - np.roll(df_data[list_minus_hp].sum(axis=1), shift=0))-200, a_min=0, a_max=1500)
             
             
             for param in list_params:

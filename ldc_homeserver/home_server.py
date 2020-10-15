@@ -35,7 +35,7 @@ global timezone
 
 
 try:
-    subnet = 1
+    subnet = 3
     dict_data = {}
     date_list = []
     hist_files = glob.glob(f'/home/pi/studies/ardmore/data/H{subnet}*.pkl*')

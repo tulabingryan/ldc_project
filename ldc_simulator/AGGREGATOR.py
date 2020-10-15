@@ -16,7 +16,7 @@ from MODELS import *
 # parent_conn, child_conn = multiprocessing.Pipe()
 
 
-class Aggregator(object):
+class Aggregator(multiprocessing.Process):
     """Aggregator for all objects of the system"""
     n = 0
     def __init__(self, dict_devices, timestamp, latitude, longitude, idx, local_ip, device_ip, step_size=1, 
@@ -26,7 +26,7 @@ class Aggregator(object):
         report=False, flex_percent=100, summary=False):
         super(Aggregator, self).__init__()
         multiprocessing.Process.__init__(self)
-        self.daemon = False
+        self.daemon = True
 
         self.name = 'Aggregator_{}'.format(self.n+1)
 
@@ -63,7 +63,7 @@ class Aggregator(object):
         self.ac_state = {}
         self.dict_meter = {}
         manager = multiprocessing.Manager()
-        self.dict_agg = {}
+        self.dict_agg = manager.dict()
         self.dict_injector = {}
         
         ### communication pipes for other processes
@@ -486,8 +486,6 @@ class Aggregator(object):
                         self.dict_common.update(read_json('/home/pi/ldc_project/ldc_simulator/dict_cmd.txt'))
                     except:
                         pass
-
-                
 
                 if self.report: print(self.dict_agg)
                 time.sleep(self.pause)
@@ -1203,7 +1201,7 @@ class Aggregator(object):
 
 
                 ### temporary calculation for indoor humidity
-                self.dict_heater['humidity_in'] = np.random.normal(1, 0.001, len(self.dict_heater['temp_in'])) * self.dict_common['humidity'] * 100
+                self.dict_heater['humidity_in'] = np.random.normal(1, 0.001, len(self.dict_heater['temp_in'])) * self.dict_common['humidity'] 
                 
                 if self.simulation==0:
                     ### read actual sensor readings 
@@ -2585,22 +2583,25 @@ class Aggregator(object):
             msg_in = data.decode("utf-8").replace("'", "\"")
             if msg_in:
                 try:
+                    # t = time.perf_counter()
                     ### receive data from main routine
-                    if multicast:
-                        self.pipe_agg_multicast1.send({'multicast': msg_in})
-                        self.dict_agg = self.pipe_agg_multicast1.recv()
-                    else:
-                        self.pipe_agg_udp1.send({'multicast': msg_in})
-                        self.dict_agg = self.pipe_agg_udp1.recv()
+                    # if multicast:
+                    #     self.pipe_agg_multicast1.send({'multicast': msg_in})
+                    #     self.dict_agg = self.pipe_agg_multicast1.recv()
+                    # else:
+                    #     self.pipe_agg_udp1.send({'multicast': msg_in})
+                    #     self.dict_agg = self.pipe_agg_udp1.recv()
 
                     if len(self.dict_agg.keys())==0: 
                         continue
 
-                    self.dict_common.update(self.dict_agg['common'])
+                    # self.dict_common.update(self.dict_agg['common'])
 
-                    if self.dict_common['is_alive']==False: 
+                    # if self.dict_common['is_alive']==False: 
+                    #     raise KeyboardInterrupt
+
+                    if not self.dict_agg['common']['is_alive']:
                         raise KeyboardInterrupt
-                    
 
                     ### interpret packet and respond
                     dict_msg = json.loads(msg_in)
@@ -2614,6 +2615,7 @@ class Aggregator(object):
                             elif v in self.dict_agg[k].keys():
                                 sock.sendto(str(self.dict_agg[k][dict_msg[k]]).encode("utf-8"), address)
     
+                    # print(dict_msg, time.perf_counter()-t)
                     time.sleep(self.pause) 
                 except socket.timeout as err:
                     raise err

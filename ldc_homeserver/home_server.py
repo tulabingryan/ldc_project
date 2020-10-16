@@ -35,7 +35,7 @@ global timezone
 
 
 try:
-    subnet = 3
+    subnet = 5
     dict_data = {}
     date_list = []
     hist_files = glob.glob(f'/home/pi/studies/ardmore/data/H{subnet}*.pkl*')
@@ -70,9 +70,10 @@ tab_style = {
         'backgroundColor': '#18252E',
         'color':'white',
         'padding': '10px',
-        'fontWeight': 'bold',
+        'hover':{'color':'red'},
+        # 'fontWeight': 'bold',
         'text-align':'center',
-        'float':'center',
+        # 'float':'center',
 }
 
 tab_selected_style = {
@@ -87,21 +88,26 @@ tab_selected_style = {
 
 
 ### ancillary functions ###
-def get_data(day, unixstart=None, unixend=None):
+def get_data(day=None, unixstart=None, unixend=None):
     """ Fetch data from the local database"""
     try:
-        # try:
-        #     df_data = pd.read_pickle(f'/home/pi/studies/ardmore/data/H{subnet}_{day}.pkl', compression='infer')
-        #     # if unixstart!=None:
-        #     #     df_data = df_data[(df_data['unixtime']>=unixstart)&(df_data['unixtime']<=unixend)]
-            
-        # except:
-        df_data = pd.read_pickle(f'/home/pi/studies/ardmore/data/H{subnet}_{day}.pkl.xz', compression='infer')    
-    
+        if day:
+            df_data = pd.read_pickle(f'/home/pi/studies/ardmore/data/H{subnet}_{day}.pkl.xz', compression='infer')    
+        else:
+            if unixstart: 
+                daystart = pd.to_datetime(unixstart, unit='s').tz_localize('UTC').tz_convert('Pacific/Auckland').strftime('%Y_%m_%d')
+                df_data = pd.read_pickle(f'/home/pi/studies/ardmore/data/H{subnet}_{daystart}.pkl.xz', compression='infer')    
+            if unixend:
+                dayend = pd.to_datetime(unixstart, unit='s').tz_localize('UTC').tz_convert('Pacific/Auckland').strftime('%Y_%m_%d')
+
+            if daystart!=dayend:
+                df = pd.read_pickle(f'/home/pi/studies/ardmore/data/H{subnet}_{dayend}.pkl.xz', compression='infer')     
+                df_data = pd.concat([df_data, df], axis=0)
+
         float_cols = [x for x in df_data.columns if  not x.startswith('timezone')]
         df_data = df_data[float_cols].astype(float)
-        print(f'/home/pi/studies/ardmore/data/H{subnet}_{day}.pkl')
-        # print(df_data)
+        df_data.index = pd.to_datetime(df_data['unixtime'].values, unit='s').tz_localize('UTC').tz_convert('Pacific/Auckland')
+        df_data = df_data.resample(f'1S').asfreq() 
         return df_data
  
     except Exception as e:
@@ -165,7 +171,7 @@ def update_data(n_intervals, history_range, json_data):
         day = datetime.datetime.now().strftime('%Y_%m_%d')
         unixend = int(time.time())
         unixstart =  int(unixend - n_points)
-        print(unixstart, unixend)
+        
     else:
         n_points = 10000
         day = '_'.join(history_range.split('-'))
@@ -174,36 +180,59 @@ def update_data(n_intervals, history_range, json_data):
         unixstart =  dt_start.timestamp()
         unixend = dt_end.timestamp()
 
-    if json_data:
-        df_data = pd.read_json(json_data, orient='split').astype(float)
-        ### get upperbound data
-        if unixend > df_data['unixtime'].max():
-            s = df_data['unixtime'].max()
-            e = unixend # np.min([unixend, s+900])
-            day = datetime.datetime.fromtimestamp(s).strftime('%Y_%m_%d')
-            new_data = get_data(day=day, unixstart=unixstart, unixend=unixend)
-            if new_data.size:
-                df_data = pd.concat([df_data, new_data.reset_index()], axis=0, sort='unixtime').reset_index(drop=True)
+    # if json_data:
+    #     df_data = pd.read_json(json_data, orient='split').astype(float)
+    #     ### get upperbound data
+    #     if unixend > df_data['unixtime'].max():
+    #         s = df_data['unixtime'].max()
+    #         e = unixend # np.min([unixend, s+900])
+    #         day = datetime.datetime.fromtimestamp(s).strftime('%Y_%m_%d')
+    #         new_data = get_data(unixstart=unixstart, unixend=unixend)
+    #         if new_data.size:
+    #             df_data = pd.concat([df_data, new_data.reset_index()], axis=0, sort='unixtime').reset_index(drop=True)
 
-        ### get lowerbound data
-        if unixstart < df_data['unixtime'].min():
-            e = df_data['unixtime'].min()
-            s = unixstart # np.max([unixstart, e-900])
-            day = datetime.datetime.fromtimestamp(s).strftime('%Y_%m_%d')
-            new_data = get_data(day=day, unixstart=unixstart, unixend=unixend)
-            if new_data.size:
-                df_data = pd.concat([new_data.reset_index(), df_data], axis=0, sort='unixtime').reset_index(drop=True)
+    #     ### get lowerbound data
+    #     if unixstart < df_data['unixtime'].min():
+    #         e = df_data['unixtime'].min()
+    #         s = unixstart # np.max([unixstart, e-900])
+    #         day = datetime.datetime.fromtimestamp(s).strftime('%Y_%m_%d')
+    #         new_data = get_data(unixstart=unixstart, unixend=unixend)
+    #         if new_data.size:
+    #             df_data = pd.concat([new_data.reset_index(), df_data], axis=0, sort='unixtime').reset_index(drop=True)
             
-    else:
-        df_data = get_data(day=day, unixstart=unixstart, unixend=unixend)
-
-
+    # else:
+    df_data = get_data(unixstart=unixstart, unixend=unixend)
+    
     if not df_data.empty:
         df_data = df_data.groupby('unixtime').mean()
         df_data.reset_index(drop=False, inplace=True)
-        print(df_data['unixtime'].astype(int))
-        df_data = df_data[(df_data['unixtime']>=unixstart) & (df_data['unixtime']<=unixend)]
-        print(df_data)
+        # df_data = df_data[(df_data['unixtime']>=unixstart) & (df_data['unixtime']<=unixend)]
+        
+        ### check if meter data is valid
+        if ('power_active_0' in df_data.columns):
+            if df_data['power_active_0'].mean() > 0.5:
+                with_meter_data = True
+            else:
+                with_meter_data = False
+        else:
+            with_meter_data = False
+
+        if with_meter_data:
+            df_data['power_kw'] = df_data['power_active_0'] 
+            ### clean validate waterheater demand based on meter data
+            list_params = [a for a in df_data.columns if a.lower().endswith('demand')]
+            list_grainy = [a for a in df_data.columns if (a.lower().endswith('demand') and not (a.lower().startswith('waterheater')) and not (a.lower().startswith('heatpump')))]  # loads emulated in the grainy load bank
+            df_data['waterheater_actual_demand'] = np.roll(df_data['waterheater_actual_demand'].values, shift=0) * ((((df_data['power_kw']*1e3) - df_data[list_grainy].sum(axis=1)>1900))*1) + np.random.normal(0, 1, df_data.index.size)
+            ### clean heatpump demand using meter data and clean waterheater demand
+            list_minus_hp = [a for a in df_data.columns if (a.lower().endswith('demand') and not (a.lower().startswith('heatpump')))]
+            df_data['heatpump_actual_demand'] = np.clip(((df_data['power_kw'] * 1000) - np.roll(df_data[list_minus_hp].sum(axis=1), shift=0))-200, a_min=0, a_max=2000)  # assume unaccounted load is 200W, i.e., computer, chroma, etc.
+            
+        else:
+            df_data['power_kw'] = df_data[[x for x in df_data.columns if x.endswith('actual_demand')]].sum(axis=1) * 1e-3
+            df_data['power_active_0'] = df_data['power_kw']
+            df_data['powerfactor_0'] = np.random.normal(0.9,0.01, df_data.index.size)
+            df_data['voltage_0'] = np.random.normal(230,0.1, df_data.index.size)
+        
         
         return  df_data.to_json(orient='split') # limit number of points to 1000 max
 
@@ -223,7 +252,6 @@ def update_graph(json_data):
     traces_temp_in = []
     traces_humidity = []
 
-    
     if json_data:
         df_data = pd.read_json(json_data, orient='split')
 
@@ -235,11 +263,10 @@ def update_graph(json_data):
             # convert timezone from UTC to local timezone before graph
             df_data.index = pd.to_datetime(df_data['unixtime'].values, unit='s').tz_localize('UTC').tz_convert('Pacific/Auckland') #[pd.to_datetime(a, unit='s').tz_localize('UTC').tz_convert('Pacific/Auckland').isoformat() for a in df_data['unixtime']]
             df_data.index = df_data.index.tz_localize(None)
-
-            df_data = df_data.resample(f'1S').mean().interpolate() #.bfill() 
-            df_data['power_kw'] = df_data['power_active_0']
-
+            ### resample data to have uniform interval
+            df_data = df_data.resample(f'{sample}S').mean().interpolate() #.bfill() 
             
+
             ### plot total house demand
             trace = go.Scattergl(
                             x = df_data.index,
@@ -262,7 +289,7 @@ def update_graph(json_data):
             graphs.append(html.Div(dcc.Graph(
                             id='total-house-demand',
                             animate=False,
-                            figure={'data': [trace, trace_rolling_avg_60s],
+                            figure={'data': [trace],
                                     'layout' : go.Layout(
                                         xaxis=dict(autorange=True),
                                         yaxis=dict(autorange=True, title='Power (kW)'),
@@ -515,15 +542,43 @@ def serve_layout():
             dcc.Tabs(id="tabs", 
                 children=[
                     dcc.Tab(
-                        label="Status", 
-                        value="status_tab", 
+                        label="House 1", 
+                        value="house_1", 
+                        style=tab_style,
+                        selected_style=tab_selected_style,
+                        className='custom-tab',
+                        ),
+                    dcc.Tab(
+                        label="House 2", 
+                        value="house_2", 
+                        style=tab_style,
+                        selected_style=tab_selected_style,
+                        className='custom-tab',
+                        ),
+                    dcc.Tab(
+                        label="House 3", 
+                        value="house_3", 
+                        style=tab_style,
+                        selected_style=tab_selected_style,
+                        className='custom-tab',
+                        ),
+                    dcc.Tab(
+                        label="House 4", 
+                        value="house_4", 
+                        style=tab_style,
+                        selected_style=tab_selected_style,
+                        className='custom-tab',
+                        ),
+                    dcc.Tab(
+                        label="House 5", 
+                        value="house_5", 
                         style=tab_style,
                         selected_style=tab_selected_style,
                         className='custom-tab',
                         ),
                     ],
-                value="status_tab",
-                className="col s12 m3 l2",
+                value="house_1",
+                className="col s12 m7 l5",
                 style=tabs_styles,
                 )                   
             ], 
@@ -682,9 +737,10 @@ def create_states_div(json_data):
                         ])
     return list_div
 
-def render_status():
+def render_status(house_num=1):
     # render content for status tab
-    global cmd_algorithm, cmd_loading, ldc_signal, date_list, dict_cmd
+    global cmd_algorithm, cmd_loading, ldc_signal, date_list, dict_cmd, subnet
+    subnet=house_num
     date_list = []
     hist_files = glob.glob(f'/home/pi/studies/ardmore/data/H{subnet}*.pkl.xz')
     list_files = [x.split('/')[-1] for x in hist_files]
@@ -692,7 +748,7 @@ def render_status():
     dates.sort()
     date_list.extend(dates)
     date_list.extend([
-        'Last 2 Hours', 
+        # 'Last 2 Hours', 
         # 'Last 1 Hour', 
         # 'Last 30 Minutes',
         # 'Last 15 Minutes',
@@ -729,7 +785,7 @@ def render_status():
         # ),
 
         html.Div([
-            html.H1("Home Status", 
+            html.H1(f"Home Status", 
                 style={
                     'marginTop':'5', 
                     'text-align':'center',
@@ -1002,15 +1058,15 @@ app.layout = serve_layout()
 
 @app.callback(Output("tab_content", "children"), [Input("tabs", "value")])
 def render_content(tab):
-        if tab == "status_tab":
-                return render_status()
-        elif tab == "settings_tab":
-                return render_settings()
-        elif tab == "history_tab":
-                return render_history()
-        else:
-                return render_status()
+    if tab in [f"house_{x}" for x in range(1,6)]:
+        return render_status(house_num=int(tab.split('_')[-1]))
+    elif tab == "settings_tab":
+        return render_settings()
+    elif tab == "history_tab":
+        return render_history()
+    else:
+        return render_status(house_num=int(tab.split('_')[-1]))
 
 
 if __name__ == "__main__":
-        app.run_server(debug=True, host='0.0.0.0', port=21003)
+    app.run_server(debug=True, host='0.0.0.0', port=21003)

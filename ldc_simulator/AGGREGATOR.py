@@ -2424,6 +2424,7 @@ class Aggregator(multiprocessing.Process):
                     #     self.dict_summary_demand.update(v)
 
                     ### get peer states
+                    self.dict_state = {}  # to ensure old data is not carried over when no update is available
                     peer_states = MULTICAST.send(dict_msg={'states':'all'}, ip='224.0.2.0', port=17000, timeout=0.3, data_bytes=65536, hops=1)
                     for address, state in peer_states.items():
                         self.dict_state.update(state)

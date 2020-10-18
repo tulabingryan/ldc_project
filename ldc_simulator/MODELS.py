@@ -1424,20 +1424,19 @@ def ldc_dongle(states, common):
         elif common['algorithm'] in ['basic_ldc', 'advanced_ldc']:
             ### change proposed_status to avoid thermostat lock out
             if (states['load_type'][0] in ['heater', 'waterheater']): ### change the proposed status to avoid thermostat lock up
-                if states['load_type'][0]=='waterheater':
-                    f_reduce = 1
-                else:
-                    f_reduce = 1
-
                 ### virtual thermostat, has lockout based on deadband and f_reduce
+                # if states['load_type'][0]=='waterheater':
+                #     f_reduce = 1
+                # else:
+                #     f_reduce = 1
                 # revised_cooling = ((((states['temp_in']>=np.subtract(states['temp_target'], np.multiply(states['tolerance'], 0.8))) & (states['actual_status']==1)) 
                 #                             | ((states['temp_in']>=np.add(states['temp_target'], np.multiply(states['tolerance'], f_reduce)))&(states['actual_status']==0)))&(states['mode']==0)) * 1
                 # revised_heating = ((((states['temp_in']<=np.add(states['temp_target'], np.multiply(states['tolerance'], 0.8)))&(states['actual_status']==1)) 
                 #                             |  ((states['temp_in']<=np.subtract(states['temp_target'], np.multiply(states['tolerance'], f_reduce)))&(states['actual_status']==0)))&(states['mode']==1)) * 1
                 
                 ### virtual relay, no lockout
-                revised_cooling = ((((states['temp_in']>=np.subtract(states['temp_target'], np.multiply(states['tolerance'], 0.8))) & (states['proposed_status']==1)))&(states['mode']==0)) * 1
-                revised_heating = ((((states['temp_in']<=np.add(states['temp_target'], np.multiply(states['tolerance'], 0.8)))&(states['proposed_status']==1)))&(states['mode']==1)) * 1
+                revised_cooling = ((((states['temp_in']>=np.subtract(states['temp_target'], np.multiply(states['tolerance'], 0.9))) & (states['proposed_status']==1)))&(states['mode']==0)) * 1
+                revised_heating = ((((states['temp_in']<=np.add(states['temp_target'], np.multiply(states['tolerance'], 0.9)))&(states['proposed_status']==1)))&(states['mode']==1)) * 1
                 
                 revised_status = np.add(revised_cooling, revised_heating)
                 proposed_status = np.multiply(states['proposed_status'], revised_status)

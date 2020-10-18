@@ -94,7 +94,7 @@ class TcpServer(multiprocessing.Process):
         print("Collecting microgrid data_meter...")
         while self.dict_common['is_alive']:
             try:
-                self.dict_meter.update(self.meter.get_meter_data(params=['power_kw','power_kvar', 'powerfactor', 'voltage', 'current', 'frequency']))
+                self.dict_meter.update(self.meter.get_meter_data(params=['power_kw','powerfactor', 'voltage', 'frequency']))
                 time.sleep(self.pause)
             except Exception as e:
                 print("Error in tcp_server.collect_data_meter:", e)
@@ -170,7 +170,7 @@ class TcpServer(multiprocessing.Process):
                 dict_save.update({unixtime:self.dict_all.copy()})
                 
                 if len(dict_save.keys())>10:
-                    self.save_pickle(dict_data=dict_save, path=f'/home/pi/ldc_project/history/T1_{today}.pkl.xz')
+                    self.save_pickle(dict_data=dict_save, path=f'/home/pi/ldc_project/history/T1_{today}.pkl')
                 # self.df_all = pd.DataFrame.from_dict(self.dict_all, orient='index').T
                 # if len(self.df_all.index):
                 #   ### save csv melted format

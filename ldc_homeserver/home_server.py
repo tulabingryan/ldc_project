@@ -264,7 +264,12 @@ def update_graph(json_data):
             df_data.index = pd.to_datetime(df_data['unixtime'].values, unit='s').tz_localize('UTC').tz_convert('Pacific/Auckland') #[pd.to_datetime(a, unit='s').tz_localize('UTC').tz_convert('Pacific/Auckland').isoformat() for a in df_data['unixtime']]
             df_data.index = df_data.index.tz_localize(None)
             ### resample data to have uniform interval
-            df_data = df_data.resample(f'{sample}S').mean().interpolate() #.bfill() 
+            df_data = df_data.resample(f'{sample}S').mean() #.bfill() 
+            list_zerona = [x for x in df_data.columns if x.endswith('demand')]
+            list_zerona.extend(['power_kw', 'power_active_0'])
+            list_avgna = [x for x in df_data.columns if x not in list_zerona]
+            df_data[list_zerona] = df_data[list_zerona].fillna(0)
+            df_data[list_avgna] = df_data[list_avgna].interpolate()
             
 
             ### plot total house demand
@@ -274,6 +279,7 @@ def update_graph(json_data):
                             name = 'power_kw',
                             mode = 'lines',
                             fill = "tozeroy",
+                            connectgaps=False,
                             opacity=0.8,
                             )
 
@@ -282,6 +288,7 @@ def update_graph(json_data):
                             y = df_data["power_kw"].rolling(60).mean(),
                             name = 'rolling_avg_60s',
                             line= {'color':'rgb(255,0,255)'},
+                            connectgaps=False,
                             # opacity = 0.8,
                             # fill = "tozeroy",
                             )
@@ -328,6 +335,7 @@ def update_graph(json_data):
                                 name = param.split('_')[0],
                                 mode = 'lines',
                                 fill = "tozeroy",
+                                connectgaps=False,
                                 opacity=0.8,
                                 )
                             ])
@@ -440,7 +448,7 @@ def update_graph(json_data):
                     go.Scattergl(
                         x = df_data.index,
                         y = df_data[param].values,
-                        name = param.split('_')[0],
+                        name = param,
                         mode = 'lines',
                         # fill = "tozeroy",
                         # opacity=0.8,
@@ -535,6 +543,24 @@ def serve_layout():
                     "backgroundColor": "#18252E"
                     }),
             ],
+        ),
+
+        html.Div([
+            html.H1(f"Home Status", 
+                style={
+                    'marginTop':'5', 
+                    'text-align':'center',
+                    'float':'center', 
+                    'color':'white'
+                    }
+                ),
+            ], 
+            className='banner', 
+            style={
+                'width':'100%', 
+                'display':'inline-block',
+                "backgroundColor": "#18252E",
+                }
         ),
         
         # tabs
@@ -784,23 +810,23 @@ def render_status(house_num=1):
         #   ], className='banner', style={'width':'100%', 'display':'inline-block',"backgroundColor": "#18252E"}
         # ),
 
-        html.Div([
-            html.H1(f"Home Status", 
-                style={
-                    'marginTop':'5', 
-                    'text-align':'center',
-                    'float':'center', 
-                    'color':'white'
-                    }
-                ),
-            ], 
-            className='banner', 
-            style={
-                'width':'100%', 
-                'display':'inline-block',
-                "backgroundColor": "#18252E",
-                }
-        ),
+        # html.Div([
+        #     html.H1(f"Home Status", 
+        #         style={
+        #             'marginTop':'5', 
+        #             'text-align':'center',
+        #             'float':'center', 
+        #             'color':'white'
+        #             }
+        #         ),
+        #     ], 
+        #     className='banner', 
+        #     style={
+        #         'width':'100%', 
+        #         'display':'inline-block',
+        #         "backgroundColor": "#18252E",
+        #         }
+        # ),
 
         html.Div([
             html.Div([

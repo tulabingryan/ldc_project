@@ -9,4 +9,3 @@ flask_caching
 dash_table_experiments # to display table
 dash-auth
 gunicorn
-pytables

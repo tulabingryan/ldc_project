@@ -491,7 +491,7 @@ class Aggregator(multiprocessing.Process):
                 time.sleep(self.pause)
             except Exception as e:
                 print(f'Error AGGREGATOR.autorun:{e}')
-                raise KeyboardInterrupt
+                
             except KeyboardInterrupt:
                 ### send stop signal to device simulators
                 for c in self.common_observer:

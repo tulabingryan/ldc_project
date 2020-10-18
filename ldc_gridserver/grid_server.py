@@ -223,20 +223,53 @@ def get_start_date(db_name='/home/pi/ldc_project/ldc_gridserver/ldc_agg_melted.d
 
 
 
-def get_data(day, unixstart=None, unixend=None):
-    """ Fetch data from the local database"""
-    df_data = pd.DataFrame([])
-    while len(df_data.index)<=0:
-        try:
-            df_data = pd.read_pickle(f'/home/pi/studies/ardmore/data/T1_{day}.pkl.xz')
-        except Exception as e:
-            # print("Error grid_server.get_data: no saved data.")
-            time.sleep(1)
+# def get_data(day, unixstart=None, unixend=None):
+#     """ Fetch data from the local database"""
+#     df_data = pd.DataFrame([])
+#     while len(df_data.index)<=0:
+#         try:
+#             df_data = pd.read_pickle(f'/home/pi/studies/ardmore/data/T1_{day}.pkl.xz')
+#         except Exception as e:
+#             # print("Error grid_server.get_data: no saved data.")
+#             time.sleep(1)
 
-    df_data['target_kw'] = df_data['target_watt'] * 1e-3
-    if unixstart!=None:
-        df_data = df_data[(df_data['unixtime']>=unixstart)&(df_data['unixtime']<=unixend)]
-    return df_data
+#     df_data['target_kw'] = df_data['target_watt'] * 1e-3
+#     if unixstart!=None:
+#         df_data = df_data[(df_data['unixtime']>=unixstart)&(df_data['unixtime']<=unixend)]
+#     return df_data
+
+
+def get_data(day=None, unixstart=None, unixend=None):
+    """ Fetch data from the local database"""
+    try:
+        if day:
+            df_data = pd.read_pickle(f'/home/pi/studies/ardmore/data/T1_{day}.pkl.xz', compression='infer')    
+        else:
+            if unixstart: 
+                daystart = pd.to_datetime(unixstart, unit='s').tz_localize('UTC').tz_convert('Pacific/Auckland').strftime('%Y_%m_%d')
+                df_data = pd.read_pickle(f'/home/pi/studies/ardmore/data/T1_{daystart}.pkl.xz', compression='infer')    
+            if unixend:
+                dayend = pd.to_datetime(unixstart, unit='s').tz_localize('UTC').tz_convert('Pacific/Auckland').strftime('%Y_%m_%d')
+
+            if daystart!=dayend:
+                df = pd.read_pickle(f'/home/pi/studies/ardmore/data/T1_{dayend}.pkl.xz', compression='infer')     
+                df_data = pd.concat([df_data, df], axis=0)
+
+        
+        float_cols = [x for x in df_data.columns if  not x.startswith('timezone')]
+        df_data = df_data[float_cols].astype(float)
+        print(df_data)
+        df_data.index = pd.to_datetime(df_data['unixtime'].values, unit='s').tz_localize('UTC').tz_convert('Pacific/Auckland')
+        df_data = df_data.resample(f'1S').mean() 
+        # df_data = df_data[(df_data['unixtime']>=unixstart)&(df_data['unixtime']<=unixend)]
+        
+        return df_data
+ 
+    except Exception as e:
+        print(f"Error get_data:{e}")
+        
+        
+    
     
 def contact_server_udp(dict_msg, ip, port, timeout=1, hops=1):
     # send multicast query to listening devices
@@ -380,10 +413,10 @@ start_date = datetime.datetime.now()
 
 # date_list = list(pd.date_range(start=start_date, end=datetime.datetime.now(), normalize=True))
 date_list = [
-    'Last 2 Hours', 
-    'Last 1 Hour', 
-    'Last 30 Minutes',
-    'Last 15 Minutes'
+    # 'Last 2 Hours', 
+    # 'Last 1 Hour', 
+    # 'Last 30 Minutes',
+    # 'Last 15 Minutes'
     ]
 date_list.reverse()
 
@@ -649,16 +682,17 @@ def update_display_gain(n_intervals):
 def update_history_option(n_intervals):
     # change the frequency signal 
     global date_list
-    hist_files = glob.glob("/home/pi/studies/ardmore/data/T1_*.pkl*")
+    hist_files = glob.glob("/home/pi/studies/ardmore/data/T1_*.pkl.xz")
     list_files = [x.split('/')[-1] for x in hist_files]
     dates = ['-'.join(x.split('.')[0].split('_')[1:]) for x in list_files]
     dates.sort()
     date_list = dates
     date_list.extend([
-        'Last 2 Hours', 
-        'Last 1 Hour', 
-        'Last 30 Minutes',
-        'Last 15 Minutes'])
+        # 'Last 2 Hours', 
+        # 'Last 1 Hour', 
+        # 'Last 30 Minutes',
+        # 'Last 15 Minutes',
+        ])
     date_list.reverse()
     return [{'label': x, 'value': x} for x in date_list]  
   
@@ -723,26 +757,26 @@ def update_data(n_intervals, history_range, json_data, graph_data):
             unixend = dt_end.timestamp()
 
 
-        if json_data:
-            df_data = pd.read_json(json_data, orient='split').astype(float)
-        else:
-            df_data = get_data(day=day, unixstart=unixstart, unixend=unixend)
+        # if json_data:
+        #     df_data = pd.read_json(json_data, orient='split').astype(float)
+        # else:
+        df_data = get_data(unixstart=unixstart, unixend=unixend)
+        print(df_data)
+        # ### get upperbound data
+        # if unixend > df_data['unixtime'].max():
+        #     s = df_data['unixtime'].max()
+        #     e = unixend # np.min([unixend, s+900])
+        #     day = datetime.datetime.fromtimestamp(s).strftime('%Y_%m_%d')
+        #     new_data = get_data(unixstart=unixstart, unixend=unixend)
+        #     df_data = pd.concat([df_data, new_data.reset_index()], axis=0, sort='unixtime').reset_index(drop=True)
 
-        ### get upperbound data
-        if unixend > df_data['unixtime'].max():
-            s = df_data['unixtime'].max()
-            e = unixend # np.min([unixend, s+900])
-            day = datetime.datetime.fromtimestamp(s).strftime('%Y_%m_%d')
-            new_data = get_data(day=day, unixstart=unixstart, unixend=unixend)
-            df_data = pd.concat([df_data, new_data.reset_index()], axis=0, sort='unixtime').reset_index(drop=True)
-
-        ### get lowerbound data
-        if unixstart < df_data['unixtime'].min():
-            e = df_data['unixtime'].min()
-            s = unixstart # np.max([unixstart, e-900])
-            day = datetime.datetime.fromtimestamp(s).strftime('%Y_%m_%d')
-            new_data = get_data(day=day, unixstart=unixstart, unixend=unixend)
-            df_data = pd.concat([new_data.reset_index(), df_data], axis=0, sort='unixtime').reset_index(drop=True)
+        # ### get lowerbound data
+        # if unixstart < df_data['unixtime'].min():
+        #     e = df_data['unixtime'].min()
+        #     s = unixstart # np.max([unixstart, e-900])
+        #     day = datetime.datetime.fromtimestamp(s).strftime('%Y_%m_%d')
+        #     new_data = get_data(unixstart=unixstart, unixend=unixend)
+        #     df_data = pd.concat([new_data.reset_index(), df_data], axis=0, sort='unixtime').reset_index(drop=True)
         
         # df_data = get_data(day=day)
 
@@ -750,7 +784,9 @@ def update_data(n_intervals, history_range, json_data, graph_data):
         df_data.index = pd.to_datetime(df_data['unixtime'].values, unit='s')
         sample = '{}S'.format(max([1,int(n_points/3600)]))
         df_data = df_data.resample(sample).mean().interpolate().reset_index(drop=True)
+        df_data['target_kw'] = df_data['target_watt'] * 1e-3
         # print("update_data dt:", time.perf_counter() - t)
+        
         return df_data.to_json(orient='split')
     except Exception as e:
         print(f'Error update_data: {e}')
@@ -1036,16 +1072,17 @@ def render_status():
     global date_list, refresh_rate, gain, dict_cmd, dict_agg, cmd_algorithm, cmd_target_watt, ldc_signal, latest_demand
 
     date_list = []
-    hist_files = glob.glob("/home/pi/studies/ardmore/data/T1_*.pkl*")
+    hist_files = glob.glob("/home/pi/studies/ardmore/data/T1_*.pkl.xz")
     list_files = [x.split('/')[-1] for x in hist_files]
     dates = ['-'.join(x.split('.')[0].split('_')[1:]) for x in list_files]
     dates.sort()
     date_list.extend(dates)
     date_list.extend([
-        'Last 2 Hours', 
-        'Last 1 Hour', 
-        'Last 30 Minutes',
-        'Last 15 Minutes'])
+        # 'Last 2 Hours', 
+        # 'Last 1 Hour', 
+        # 'Last 30 Minutes',
+        # 'Last 15 Minutes',
+        ])
     date_list.reverse()
 
     return html.Div(children=[
@@ -1422,7 +1459,7 @@ def render_history():
     global refresh_rate, gain, dict_cmd, dict_agg, cmd_algorithm, cmd_target_watt, previous_limit, ldc_signal, latest_demand, start_date
     # date_list = pd.date_range(start=start_date, end=datetime.datetime.now(), normalize=True)
     # date_list = [a.strftime('%Y_%m_%d') for a in date_list]
-    hist_files = glob.glob("/home/pi/studies/ardmore/data/T1_*.pkl*")
+    hist_files = glob.glob("/home/pi/studies/ardmore/data/T1_*.pkl.xz")
     list_files = [x.split('/')[-1] for x in hist_files]
     date_list = [x.split('.')[0] for x in list_files]
     date_list.sort()

@@ -210,7 +210,8 @@ def update_data(n_intervals, history_range, json_data):
         
         ### check if meter data is valid
         if ('power_active_0' in df_data.columns):
-            if df_data['power_active_0'].mean() > 0.5:
+            df_data['power_active_0'] = df_data['power_active_0'].fillna(0)
+            if df_data['power_active_0'].mean() > 0.1:
                 with_meter_data = True
             else:
                 with_meter_data = False
@@ -232,7 +233,6 @@ def update_data(n_intervals, history_range, json_data):
             df_data['power_active_0'] = df_data['power_kw']
             df_data['powerfactor_0'] = np.random.normal(0.9,0.01, df_data.index.size)
             df_data['voltage_0'] = np.random.normal(230,0.1, df_data.index.size)
-        
         
         return  df_data.to_json(orient='split') # limit number of points to 1000 max
 
@@ -270,6 +270,7 @@ def update_graph(json_data):
             list_avgna = [x for x in df_data.columns if x not in list_zerona]
             df_data[list_zerona] = df_data[list_zerona].fillna(0)
             df_data[list_avgna] = df_data[list_avgna].interpolate()
+                
             
 
             ### plot total house demand

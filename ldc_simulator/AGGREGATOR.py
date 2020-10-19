@@ -448,39 +448,6 @@ class Aggregator(multiprocessing.Process):
                             elif key in ['injector']:
                                 self.dict_common.update(self.dict_agg['injector'])
 
-
-                    # ### door
-                    # if self.pipe_agg_door0.poll():
-                    #   dev_state = self.pipe_agg_door0.recv()
-                    #   self.dict_agg.update({'door':dev_state})
-                    #   for k in dev_state.keys():
-                    #     if k.startswith('door'):
-                    #       self.dict_state.update({f'{k}_actual_status': dev_state[k]['actual_status'][0]})
-                    # ### window
-                    # if self.pipe_agg_window0.poll():
-                    #   dev_state = self.pipe_agg_window0.recv()
-                    #   self.dict_agg.update({'window':dev_state})
-                    #   for k in dev_state.keys():
-                    #     if k.startswith('window'):
-                    #       self.dict_state.update({f'{k}_actual_status': dev_state[k]['actual_status'][0]})
-                    # ### valve
-                    # if self.pipe_agg_valve0.poll():
-                    #   dev_state = self.pipe_agg_valve0.recv()
-                    #   self.dict_agg.update({'valve':dev_state})
-                    #   for k in dev_state.keys():
-                    #     if k.startswith('valve'):
-                    #       self.dict_state.update({f'{k}_actual_status': dev_state[k]['actual_status'][0]})
-                            
-                    # ### spi ldc_signal sensor
-                    # if self.pipe_agg_listener0.poll():  
-                    #   self.dict_common.update(self.pipe_agg_listener0.recv())
-
-                    # ### meter
-                    # if self.pipe_agg_meter0.poll():
-                    #   self.dict_state.update(self.pipe_agg_meter0.recv())
-
-
-
                     ### update dict_cmd
                     try:
                         self.dict_common.update(read_json('/home/pi/ldc_project/ldc_simulator/dict_cmd.txt'))
@@ -491,6 +458,7 @@ class Aggregator(multiprocessing.Process):
                 time.sleep(self.pause)
             except Exception as e:
                 print(f'Error AGGREGATOR.autorun:{e}')
+                raise KeyboardInterrupt
                 
             except KeyboardInterrupt:
                 ### send stop signal to device simulators

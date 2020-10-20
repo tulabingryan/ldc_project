@@ -244,7 +244,7 @@ class Aggregator(multiprocessing.Process):
             self.list_processes.append(multiprocessing.Process(target=self.udp_server, args=(), name='udp_server'))
             self.list_processes.append(multiprocessing.Process(target=self.multicast_server, args=(), name='multicast_server'))
             self.list_processes.append(multiprocessing.Process(target=self.ldc_listener, args=(), name='ldc_listener'))
-            self.agg_observer.extend([self.pipe_agg_listener0, self.pipe_agg_multicast0, self.pipe_agg_udp0])
+            self.agg_observer.extend([self.pipe_agg_listener0]) #, self.pipe_agg_multicast0, self.pipe_agg_udp0])
 
             if self.device_ip==100:
                 self.list_processes.append(multiprocessing.Process(target=self.drive_grainy, args=(), name='drive_grainy'))
@@ -459,7 +459,7 @@ class Aggregator(multiprocessing.Process):
             except Exception as e:
                 print(f'Error AGGREGATOR.autorun:{e}')
                 raise KeyboardInterrupt
-                
+
             except KeyboardInterrupt:
                 ### send stop signal to device simulators
                 for c in self.common_observer:
@@ -2379,8 +2379,11 @@ class Aggregator(multiprocessing.Process):
                 try:
                     ### get data from local process
                     dict_agg = self.pipe_agg_grainy1.recv()
-                    if len(dict_agg.keys())==0: continue
+                    if len(dict_agg.keys())==0: 
+                        continue
+                    
                     self.dict_common.update(dict_agg['common'])
+                    
                     if self.dict_common['is_alive']==False: 
                         raise KeyboardInterrupt
                     
@@ -2393,7 +2396,7 @@ class Aggregator(multiprocessing.Process):
 
                     ### get peer states
                     self.dict_state = {}  # to ensure old data is not carried over when no update is available
-                    peer_states = MULTICAST.send(dict_msg={'states':'all'}, ip='224.0.2.0', port=17000, timeout=0.3, data_bytes=65536, hops=1)
+                    peer_states = MULTICAST.send(dict_msg={'states':'all'}, ip='224.0.2.0', port=17000, timeout=0.3, data_bytes=8192, hops=1)
                     for address, state in peer_states.items():
                         self.dict_state.update(state)
                         for k, v in state.items():

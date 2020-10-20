@@ -258,9 +258,9 @@ def get_data(day=None, unixstart=None, unixend=None):
         
         float_cols = [x for x in df_data.columns if  not x.startswith('timezone')]
         df_data = df_data[float_cols].astype(float)
-        print(df_data)
-        df_data.index = pd.to_datetime(df_data['unixtime'].values, unit='s').tz_localize('UTC').tz_convert('Pacific/Auckland')
-        df_data = df_data.resample(f'1S').mean() 
+        # print(df_data)
+        # df_data.index = pd.to_datetime(df_data['unixtime'].values, unit='s').tz_localize('UTC').tz_convert('Pacific/Auckland')
+        # df_data = df_data.resample(f'1S').mean() 
         # df_data = df_data[(df_data['unixtime']>=unixstart)&(df_data['unixtime']<=unixend)]
         
         return df_data
@@ -448,7 +448,7 @@ while len(dict_cmd.keys())<=0:
     gain = float(dict_cmd['gain'])
     
 
-df_data = get_data(day=datetime.datetime.now().strftime('%Y_%m_%d')).reset_index(drop=True)
+df_data = get_data(day=datetime.datetime.now().strftime('%Y_%m_%d'))#.reset_index(drop=True)
 
 
 # returns logo div
@@ -527,6 +527,7 @@ def update_settings(n_submit, algorithm, set_target, target_watt):
         if cmd_algorithm=='no_ldc':
             ldc_signal = 850
             send_command(dict_cmd={"cmd":"o {}".format(ldc_signal), "algorithm":cmd_algorithm}, ip=tcp_ip, port=tcp_port)
+            send_command(dict_cmd={"cmd":"s {}".format(30000), "algorithm":cmd_algorithm, "set_target":30000}, ip=tcp_ip, port=tcp_port)
 
         elif cmd_algorithm=='ripple_control':
             now = datetime.datetime.now()

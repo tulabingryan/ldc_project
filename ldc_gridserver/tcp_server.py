@@ -57,7 +57,7 @@ class TcpServer(multiprocessing.Process):
         self.pause = 1e-16
 
         # SERVER.ThreadedServer.__init__(self, self.tcp_ip, self.tcp_port)
-        self.meter = METER.EnergyMeter(group=1001, powermeter_ids=[1,2,3], autorun=False)
+        self.meter = METER.EnergyMeter(house=1001, IDs=[1,2,3], autorun=False)
         self.injector = INJECTOR.LdcInjector()
 
         # initialize communication to serial port and spi
@@ -94,7 +94,7 @@ class TcpServer(multiprocessing.Process):
         print("Collecting microgrid data_meter...")
         while self.dict_common['is_alive']:
             try:
-                self.dict_meter.update(self.meter.get_meter_data(params=['power_kw','powerfactor', 'voltage', 'frequency']))
+                self.dict_meter.update(self.meter.get_meter_data(params=['power_active','powerfactor', 'voltage', 'frequency']))
                 time.sleep(self.pause)
             except Exception as e:
                 print("Error in tcp_server.collect_data_meter:", e)
@@ -149,7 +149,7 @@ class TcpServer(multiprocessing.Process):
                 if self.report: 
                     print(self.dict_all)
 
-                time.sleep(1)
+                time.sleep(self.pause)
             except Exception as e:
                 print("Error tcp_server.collect_data_all:", e)
                 time.sleep(1)
@@ -181,7 +181,7 @@ class TcpServer(multiprocessing.Process):
                 #   with open(filename, 'a') as f:
                 #     df_agg.to_csv(f, mode='a', header=f.tell()==0, index=False)
                 #     time.sleep(1)
-                time.sleep(1)
+                time.sleep(self.pause)
             except Exception as e:
                 print("Error tcp_server.save_data:", e)
                 pass

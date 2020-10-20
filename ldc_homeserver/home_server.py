@@ -267,6 +267,7 @@ def update_graph(json_data):
             df_data = df_data.resample(f'{sample}S').mean() #.bfill() 
             list_zerona = [x for x in df_data.columns if x.endswith('demand')]
             list_zerona.extend(['power_kw', 'power_active_0'])
+            list_zerona.extend([x for x in df_data.columns if x.endswith('status')])
             list_avgna = [x for x in df_data.columns if x not in list_zerona]
             df_data[list_zerona] = df_data[list_zerona].fillna(0)
             df_data[list_avgna] = df_data[list_avgna].interpolate()

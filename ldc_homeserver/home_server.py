@@ -107,7 +107,7 @@ def get_data(day=None, unixstart=None, unixend=None):
         float_cols = [x for x in df_data.columns if  not x.startswith('timezone')]
         df_data = df_data[float_cols].astype(float)
         df_data.index = pd.to_datetime(df_data['unixtime'].values, unit='s').tz_localize('UTC').tz_convert('Pacific/Auckland')
-        df_data = df_data.resample(f'1S').asfreq() 
+        df_data = df_data.resample(f'1S').mean().interpolate()
         return df_data
  
     except Exception as e:

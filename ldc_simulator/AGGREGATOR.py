@@ -65,6 +65,7 @@ class Aggregator(multiprocessing.Process):
         manager = multiprocessing.Manager()
         self.dict_agg = manager.dict()
         self.dict_injector = {}
+        self.dict_config = read_json('/home/pi/ldc_project/config_self.json')
         
         ### communication pipes for other processes
         self.pipe_agg_baseload0, self.pipe_agg_baseload1 = multiprocessing.Pipe()
@@ -2375,6 +2376,10 @@ class Aggregator(multiprocessing.Process):
             self.dict_history = {}
             dict_agg = {}
             last_day = datetime.datetime.now().strftime("%Y_%m_%d")
+            
+            peers = MULTICAST.send(dict_msg={'config':'all'}, ip='224.0.2.0', port=17000, timeout=1.0, data_bytes=4096, hops=1)
+            peer_states = {}
+
             while True:
                 try:
                     ### get data from local process
@@ -2387,16 +2392,16 @@ class Aggregator(multiprocessing.Process):
                     if self.dict_common['is_alive']==False: 
                         raise KeyboardInterrupt
                     
-                    self.dict_summary_demand = {} #dict_agg['summary']['demand']
+                    ### update peer address
+                    if self.dict_common['second'] < 2:
+                        peers.update(MULTICAST.send(dict_msg={'config':'all'}, ip='224.0.2.0', port=17000, timeout=0.5, data_bytes=4096, hops=1))
+                        
 
-                    ### get data from network devices
-                    # peer_demand = MULTICAST.send(dict_msg={"summary":"demand"}, ip='224.0.2.0', port=17000, timeout=0.3, hops=1)
-                    # for k, v in peer_demand.items(): 
-                    #     self.dict_summary_demand.update(v)
+                    self.dict_summary_demand = {} #dict_agg['summary']['demand']
 
                     ### get peer states
                     self.dict_state = {}  # to ensure old data is not carried over when no update is available
-                    peer_states = MULTICAST.send(dict_msg={'states':'all'}, ip='224.0.2.0', port=17000, timeout=0.3, data_bytes=8192, hops=1)
+                    [peer_states.update(MULTICAST.send(dict_msg={'states':'all'}, ip=p, port=17001, timeout=0.1, data_bytes=4096, hops=1)) for p in peers.keys()]
                     for address, state in peer_states.items():
                         self.dict_state.update(state)
                         for k, v in state.items():
@@ -2549,6 +2554,7 @@ class Aggregator(multiprocessing.Process):
 
     def receive_respond(self, sock, multicast=True):
         'Receive and respond to clients'
+        self.dict_config = read_json('/home/pi/ldc_project/config_self.json')
         while True:
             ### receive message from network
             data, address = sock.recvfrom(4096)
@@ -2586,6 +2592,9 @@ class Aggregator(multiprocessing.Process):
                                 sock.sendto(str(self.dict_agg[k]).encode("utf-8"), address)
                             elif v in self.dict_agg[k].keys():
                                 sock.sendto(str(self.dict_agg[k][dict_msg[k]]).encode("utf-8"), address)
+                        if k=='config':
+                            sock.sendto(str(self.dict_config).encode("utf-8"), address)
+
     
                     # print(dict_msg, time.perf_counter()-t)
                     time.sleep(self.pause) 

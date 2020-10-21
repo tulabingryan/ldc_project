@@ -2392,31 +2392,13 @@ class Aggregator(multiprocessing.Process):
                     if self.dict_common['is_alive']==False: 
                         raise KeyboardInterrupt
                     
-                    ### update peer address
-                    if self.dict_common['second'] < 2:
-                        peers.update(MULTICAST.send(dict_msg={'config':'all'}, ip='224.0.2.0', port=17000, timeout=0.5, data_bytes=4096, hops=1))
-                        
-
-                    self.dict_summary_demand = {} #dict_agg['summary']['demand']
-
-                    ### get peer states
-                    self.dict_state = {}  # to ensure old data is not carried over when no update is available
-                    [peer_states.update(MULTICAST.send(dict_msg={'states':'all'}, ip=p, port=17001, timeout=0.1, data_bytes=4096, hops=1)) for p in peers.keys()]
-                    for address, state in peer_states.items():
-                        self.dict_state.update(state)
-                        for k, v in state.items():
-                            if k.endswith('actual_demand'):
-                                self.dict_summary_demand.update({k:float(v)})
-
-                    ### save all states
-                    self.dict_state.update({"unixtime": self.dict_common['unixtime'] })
-                    self.dict_history.update({self.dict_common['unixtime']: self.dict_state})            
-                    self.dict_history = self.save_pickle(dict_data=self.dict_history, path=f'/home/pi/ldc_project/history/H{self.house_num}_{self.dict_common["today"]}.pkl')
-                    ### compress saved data at start of new day
-                    if self.dict_common['today']!=last_day:
-                        self.compress_pickle(path=f'/home/pi/ldc_project/history/H{self.house_num}_{last_day}.pkl')
-                    last_day = self.dict_common['today']
-
+                    self.dict_summary_demand = dict_agg['summary']['demand'] 
+                    ### query demand from network devices to be emulated in the grainy load
+                    # peer_demands = MULTICAST.send(dict_msg={'summary':'demand'}, ip='224.0.2.0', port=17000, timeout=0.3, data_bytes=4096, hops=1)
+                    # for address, demand in peer_demands.items():
+                    #     for k, v in demand.items():
+                    #         if k.endswith('actual_demand'):
+                    #             self.dict_summary_demand.update({k:float(v)})
 
                     ### add all demand except heatpump and waterheater demand
                     total = np.sum([np.sum(self.dict_summary_demand[k]) for k in self.dict_summary_demand.keys() if not (k.startswith('heatpump') or k.startswith('waterheater'))])
@@ -2451,6 +2433,25 @@ class Aggregator(multiprocessing.Process):
                         rs232.write(cmd.encode())
                         rs232.write(b'LOAD ON\r\n')
 
+                    ### get peer states
+                    self.dict_state = {}  # to ensure old data is not carried over when no update is available
+                    peer_states = MULTICAST.send(dict_msg={'states':'all'}, ip='224.0.2.0', port=17000, timeout=0.4, data_bytes=4096, hops=1)
+                    for address, state in peer_states.items():
+                        self.dict_state.update(state)
+                        # for k, v in state.items():
+                        #     if k.endswith('actual_demand'):
+                        #         self.dict_summary_demand.update({k:float(v)})
+
+                    ### save all states
+                    self.dict_state.update({"unixtime": self.dict_common['unixtime'] })
+                    self.dict_history.update({self.dict_common['unixtime']: self.dict_state})            
+                    self.dict_history = self.save_pickle(dict_data=self.dict_history, path=f'/home/pi/ldc_project/history/H{self.house_num}_{self.dict_common["today"]}.pkl')
+                    ### compress saved data at start of new day
+                    if self.dict_common['today']!=last_day:
+                        self.compress_pickle(path=f'/home/pi/ldc_project/history/H{self.house_num}_{last_day}.pkl')
+                    last_day = self.dict_common['today']
+
+
                     self.pipe_agg_grainy1.send({'emulated_demand': {'grainy': grainy, 'chroma': chroma}})
                     time.sleep(self.pause)
                 except KeyboardInterrupt:
@@ -2477,10 +2478,10 @@ class Aggregator(multiprocessing.Process):
                 df_all = pd.concat([on_disk, df_all], axis=0, sort=False).reset_index(drop=True)
                 df_all['unixtime'] = df_all['unixtime'].astype(int)
                 df_all = df_all.groupby('unixtime').mean().reset_index(drop=False)
-                df_all.to_pickle(path, compression='infer')
             except Exception as e:
-                df_all.to_pickle(path, compression='infer')
-            
+                pass
+
+            df_all.to_pickle(path, compression='infer')
             return {}
         except Exception as e:
             print("Error save_pickle:", e)

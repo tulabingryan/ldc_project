@@ -270,7 +270,7 @@ def update_graph(json_data):
             list_zerona.extend([x for x in df_data.columns if x.endswith('status')])
             list_avgna = [x for x in df_data.columns if x not in list_zerona]
             df_data[list_zerona] = df_data[list_zerona].fillna(0)
-            df_data[list_avgna] = df_data[list_avgna].interpolate()
+            # df_data[list_avgna] = df_data[list_avgna].interpolate()
                 
             
 

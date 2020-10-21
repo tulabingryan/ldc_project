@@ -12,6 +12,7 @@ from optparse import OptionParser
 
 
 def get_file_list(path='*.*'):
+    last_edit = os.stat(p).st_mtime
     return glob.glob(path)
 
     
@@ -31,13 +32,36 @@ def compress_pickle(path):
     Convert feather file to pkl.xz to reduce size 
     '''
     try:
-        df_all = pd.read_pickle(path, compression='infer')
+        df_all = pd.read_pickle(f'{path}', compression='infer')
         df_all.to_pickle(f'{path}.xz', compression='infer')
-        # print(f'converted:{path}')
     except Exception as e:
         print("Error compress_pickle:", e)
         
 
+
+# def join_pickle():
+#     '''
+#     Convert feather file to pkl.xz to reduce size 
+#     '''
+#     try:
+#         paths_all = glob.glob(f'/home/pi/ldc_project/history/*.pkl')
+#         if paths_all:
+#             days = np.unique([f"{'_'.join(x.split('_')[:-1])}" for x in paths_all])
+#             for day in days:
+#                 paths = [x for x in paths_all if x.startswith(day)]
+#                 if paths:
+#                     df_new = pd.concat([pd.read_pickle(p, compression='infer') for p in paths], axis=0, sort='unixtime')
+#                     file = f"{'_'.join(paths[0].split('_')[:-1])}"
+#                     df_old = pd.read_pickle(f'{file}.pkl.xz', compression='infer')
+#                     df_all = pd.concat([df_old, df_new], axis=0, sort='unixtime')
+#                     df_all['unixtime'] = df_all['unixtime'].astype(int)
+#                     df_all = df_all.groupby('unixtime').mean().reset_index(drop=False)
+#                     df_all.to_pickle(f'{file}.pkl.xz', compression='infer')
+#                     [os.remove(p) for p in paths]
+                
+#     except Exception as e:
+#         print("Error compress_pickle:", e)
+        
 
 def sync_files(dict_paths, remove_source=False, options='-auhe'):
     '''
@@ -104,7 +128,7 @@ def main():
     last_edit = time.time()
     while True:
         try:
-            local_ip = get_local_ip()  # ensures network connection
+            # local_ip = get_local_ip()  # ensures network connection
             now = datetime.datetime.now()
             dt = now.timetuple()
             today = now.strftime('%Y_%m_%d')
@@ -123,10 +147,10 @@ def main():
                 delete_old('/home/pi/ldc_project/ldc_homeserver/history/*', n_retain=5)
             else:
                 for p in glob.glob(f'/home/pi/ldc_project/history/*{today}.pkl'):
-                    if os.stat(p).st_mtime > last_edit:
+                    if last_edit < os.stat(p).st_mtime:
                         last_edit = os.stat(p).st_mtime
                         compress_pickle(p)
-                
+                             
                 sync_files(dict_paths=dict_paths, remove_source=False)
 
              

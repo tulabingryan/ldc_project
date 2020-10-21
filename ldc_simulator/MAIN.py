@@ -301,8 +301,10 @@ if __name__ == '__main__':
         devices_to_simulate = ['house', 'baseload', 
             'heatpump', 'heater', 'waterheater', 'fridge', 'freezer',   # thermostat controlled
             'clotheswasher', 'clothesdryer', 'dishwasher',              # non-thermostat controlled
-            # 'ev', 'storage',                                          # battery-based
-            # 'solar', 'wind'                                           # local generation
+            'ev', 
+            # 'storage',                                          # battery-based
+            'solar', 
+            # 'wind'                                           # local generation
             ]
 
         if study=='tcl_control':
@@ -329,6 +331,9 @@ if __name__ == '__main__':
                 algorithm=algorithm, target=target, distribution=distribution, ranking=ranking, 
                 resolution=resolution, ki=ki, tcl_control=tcl_control, delay=delay, report=report, 
                 flex_percent=flex_percent, summary=True)
+
+        elif study=='DER':
+            pass
         
         elif study=='hierarchy':
             ldc_loads = {

@@ -2363,109 +2363,115 @@ class Aggregator(multiprocessing.Process):
 
     def drive_grainy(self):
         # initialization to drive the pifacedigital
-        try:
-            import serial
-            import pifacedigitalio
-            import RPi.GPIO as GPIO
-            GPIO.setmode(GPIO.BOARD)
-            GPIO.setwarnings(False)
-            self.pins = [0,0,0,0,0,0,0,0]
-            self.pf = pifacedigitalio.PiFaceDigital()
-            self.df_relay, self.df_states = FUNCTIONS.create_states(report=False)  # create power levels based on resistor bank
-            
-            self.dict_history = {}
-            dict_agg = {}
-            last_day = datetime.datetime.now().strftime("%Y_%m_%d")
-            
-            peers = MULTICAST.send(dict_msg={'config':'all'}, ip='224.0.2.0', port=17000, timeout=1.0, data_bytes=4096, hops=1)
-            peer_states = {}
+        active = True
+        while active:
+            try:
+                time.sleep(15)  # delay 15 seconds to allow hardware to bootup
 
-            while True:
-                try:
-                    ### get data from local process
-                    dict_agg = self.pipe_agg_grainy1.recv()
-                    if len(dict_agg.keys())==0: 
-                        continue
-                    
-                    self.dict_common.update(dict_agg['common'])
-                    
-                    if self.dict_common['is_alive']==False: 
-                        raise KeyboardInterrupt
-                    
-                    self.dict_summary_demand = dict_agg['summary']['demand'] 
-                    ### query demand from network devices to be emulated in the grainy load
-                    # peer_demands = MULTICAST.send(dict_msg={'summary':'demand'}, ip='224.0.2.0', port=17000, timeout=0.3, data_bytes=4096, hops=1)
-                    # for address, demand in peer_demands.items():
-                    #     for k, v in demand.items():
-                    #         if k.endswith('actual_demand'):
-                    #             self.dict_summary_demand.update({k:float(v)})
+                import serial
+                import pifacedigitalio
+                import RPi.GPIO as GPIO
+                GPIO.setmode(GPIO.BOARD)
+                GPIO.setwarnings(False)
+                self.pins = [0,0,0,0,0,0,0,0]
+                self.pf = pifacedigitalio.PiFaceDigital()
+                self.df_relay, self.df_states = FUNCTIONS.create_states(report=False)  # create power levels based on resistor bank
+                print('piface setup successfull...')
 
-                    ### add all demand except heatpump and waterheater demand
-                    total = np.sum([np.sum(self.dict_summary_demand[k]) for k in self.dict_summary_demand.keys() if not (k.startswith('heatpump') or k.startswith('waterheater'))])
-                    total = min([total, 10e3]) #limit to 10kW
+                self.dict_history = {}
+                dict_agg = {}
+                last_day = datetime.datetime.now().strftime("%Y_%m_%d")
+                
+                peers = MULTICAST.send(dict_msg={'config':'all'}, ip='224.0.2.0', port=17000, timeout=1.0, data_bytes=4096, hops=1)
+                peer_states = {}
 
-                    ### convert total load value into 8-bit binary to drive 8 pinouts of piface
-                    newpins, grainy, chroma = FUNCTIONS.relay_pinouts(total, self.df_relay, self.df_states, report=False)
-                    # newpins, grainy, chroma = FUNCTIONS.pinouts(total, self.df_states, report=False)
-                    '''Note: chroma load does the finer load emulation, i.e., <50W'''
-                    ### execute piface command
-                    for i in range(len(self.pins)):
-                        if self.pins[i]==0 and newpins[i]==1:
-                            self.pf.output_pins[i].turn_on()
-                        elif self.pins[i]==1 and newpins[i]==0:
+                while True:
+                    try:
+                        ### get data from local process
+                        dict_agg = self.pipe_agg_grainy1.recv()
+                        if len(dict_agg.keys())==0: 
+                            continue
+                        
+                        self.dict_common.update(dict_agg['common'])
+                        
+                        if self.dict_common['is_alive']==False: 
+                            raise KeyboardInterrupt
+                        
+                        self.dict_summary_demand = dict_agg['summary']['demand'] 
+                        ### query demand from network devices to be emulated in the grainy load
+                        # peer_demands = MULTICAST.send(dict_msg={'summary':'demand'}, ip='224.0.2.0', port=17000, timeout=0.3, data_bytes=4096, hops=1)
+                        # for address, demand in peer_demands.items():
+                        #     for k, v in demand.items():
+                        #         if k.endswith('actual_demand'):
+                        #             self.dict_summary_demand.update({k:float(v)})
+
+                        ### add all demand except heatpump and waterheater demand
+                        total = np.sum([np.sum(self.dict_summary_demand[k]) for k in self.dict_summary_demand.keys() if not (k.startswith('heatpump') or k.startswith('waterheater'))])
+                        total = min([total, 10e3]) #limit to 10kW
+
+                        ### convert total load value into 8-bit binary to drive 8 pinouts of piface
+                        newpins, grainy, chroma = FUNCTIONS.relay_pinouts(total, self.df_relay, self.df_states, report=False)
+                        # newpins, grainy, chroma = FUNCTIONS.pinouts(total, self.df_states, report=False)
+                        '''Note: chroma load does the finer load emulation, i.e., <50W'''
+                        ### execute piface command
+                        for i in range(len(self.pins)):
+                            if self.pins[i]==0 and newpins[i]==1:
+                                self.pf.output_pins[i].turn_on()
+                            elif self.pins[i]==1 and newpins[i]==0:
+                                self.pf.output_pins[i].turn_off()
+                        self.pins = newpins  # store updated pin states
+
+                        ### execute chroma emulation, send through rs232
+                        rs232 = serial.Serial(
+                            port='/dev/ttyUSB0',
+                            baudrate = 57600,
+                            parity=serial.PARITY_NONE,
+                            stopbits=serial.STOPBITS_ONE,
+                            bytesize=serial.EIGHTBITS,
+                            timeout=1)
+                        if chroma<=0:
+                            rs232.write(b'LOAD OFF\r\n')
+                        else:    
+                            rs232.write(b'CURR:PEAK:MAX 28\r\n')
+                            rs232.write(b'MODE POW\r\n')
+                            cmd = 'POW '+ str(chroma) +'\r\n'
+                            rs232.write(cmd.encode())
+                            rs232.write(b'LOAD ON\r\n')
+
+                        ### get peer states
+                        self.dict_state = {}  # to ensure old data is not carried over when no update is available
+                        peer_states = MULTICAST.send(dict_msg={'states':'all'}, ip='224.0.2.0', port=17000, timeout=0.4, data_bytes=4096, hops=1)
+                        for address, state in peer_states.items():
+                            self.dict_state.update(state)
+                            # for k, v in state.items():
+                            #     if k.endswith('actual_demand'):
+                            #         self.dict_summary_demand.update({k:float(v)})
+
+                        ### save all states
+                        self.dict_state.update({"unixtime": self.dict_common['unixtime'] })
+                        self.dict_history.update({self.dict_common['unixtime']: self.dict_state})            
+                        self.dict_history = self.save_pickle(dict_data=self.dict_history, path=f'/home/pi/ldc_project/history/H{self.house_num}_{self.dict_common["today"]}.pkl')
+                        ### compress saved data at start of new day
+                        if self.dict_common['today']!=last_day:
+                            self.compress_pickle(path=f'/home/pi/ldc_project/history/H{self.house_num}_{last_day}.pkl')
+                        last_day = self.dict_common['today']
+
+
+                        self.pipe_agg_grainy1.send({'emulated_demand': {'grainy': grainy, 'chroma': chroma}})
+                        time.sleep(self.pause)
+                    except KeyboardInterrupt:
+                        print("Terminating grainy load driver...")
+                        self.pipe_agg_grainy1.close()
+                        for i in range(len(self.pins)):
                             self.pf.output_pins[i].turn_off()
-                    self.pins = newpins  # store updated pin states
-
-                    ### execute chroma emulation, send through rs232
-                    rs232 = serial.Serial(
-                        port='/dev/ttyUSB0',
-                        baudrate = 57600,
-                        parity=serial.PARITY_NONE,
-                        stopbits=serial.STOPBITS_ONE,
-                        bytesize=serial.EIGHTBITS,
-                        timeout=1)
-                    if chroma<=0:
-                        rs232.write(b'LOAD OFF\r\n')
-                    else:    
-                        rs232.write(b'CURR:PEAK:MAX 28\r\n')
-                        rs232.write(b'MODE POW\r\n')
-                        cmd = 'POW '+ str(chroma) +'\r\n'
-                        rs232.write(cmd.encode())
-                        rs232.write(b'LOAD ON\r\n')
-
-                    ### get peer states
-                    self.dict_state = {}  # to ensure old data is not carried over when no update is available
-                    peer_states = MULTICAST.send(dict_msg={'states':'all'}, ip='224.0.2.0', port=17000, timeout=0.4, data_bytes=4096, hops=1)
-                    for address, state in peer_states.items():
-                        self.dict_state.update(state)
-                        # for k, v in state.items():
-                        #     if k.endswith('actual_demand'):
-                        #         self.dict_summary_demand.update({k:float(v)})
-
-                    ### save all states
-                    self.dict_state.update({"unixtime": self.dict_common['unixtime'] })
-                    self.dict_history.update({self.dict_common['unixtime']: self.dict_state})            
-                    self.dict_history = self.save_pickle(dict_data=self.dict_history, path=f'/home/pi/ldc_project/history/H{self.house_num}_{self.dict_common["today"]}.pkl')
-                    ### compress saved data at start of new day
-                    if self.dict_common['today']!=last_day:
-                        self.compress_pickle(path=f'/home/pi/ldc_project/history/H{self.house_num}_{last_day}.pkl')
-                    last_day = self.dict_common['today']
-
-
-                    self.pipe_agg_grainy1.send({'emulated_demand': {'grainy': grainy, 'chroma': chroma}})
-                    time.sleep(self.pause)
-                except KeyboardInterrupt:
-                    print("Terminating grainy load driver...")
-                    self.pipe_agg_grainy1.close()
-                    for i in range(len(self.pins)):
-                        self.pf.output_pins[i].turn_off()
-                    break
-                except Exception as e:
-                    print("Error drive_grainy:", e)
-                    self.pipe_agg_grainy1.send({})
-        except Exception as e:
-            print("Error setting up piface:{}".format(e))
-        
+                        active = False  # to break from the main loop
+                        break  # break from inner loop
+                    except Exception as e:
+                        print("Error drive_grainy:", e)
+                        self.pipe_agg_grainy1.send({})
+            except Exception as e:
+                print("Error setting up piface:{}".format(e))
+                break  # break from main loop
 
 
     @staticmethod

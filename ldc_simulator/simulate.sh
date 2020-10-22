@@ -17,7 +17,7 @@
 # cd /home/pi/ldc_project/ldc_simulator/ && /home/pi/anaconda3/bin/python MAIN.py --simulate 1 --season 1 --days 7 --timestep 1.0 --ki 0.1 --network 4 --case 204 --flex 100 --delay 1 --tcl_control direct --adoption 1.0 --target auto --algorithm basic_ldc --distribution per_device --ranking static --resolution 0  &&
 
 
-cd /home/pi/ldc_project/ldc_simulator/ && /home/pi/anaconda3/bin/python MAIN.py --simulate 1 --season 1 --days 7 --timestep 1 --ki 0.8 --network 4 --case 17 --flex 100 --delay 1 --tcl_control direct --adoption 1.0 --target 33.33 --algorithm basic_ldc --distribution per_house --ranking static --resolution 3  &&
+# cd /home/pi/ldc_project/ldc_simulator/ && /home/pi/anaconda3/bin/python MAIN.py --simulate 1 --season 1 --days 7 --timestep 1 --ki 0.8 --network 4 --case 17 --flex 100 --delay 1 --tcl_control direct --adoption 1.0 --target 33.33 --algorithm basic_ldc --distribution per_house --ranking static --resolution 3  &&
 # cd /home/pi/ldc_project/ldc_simulator/ && /home/pi/anaconda3/bin/python MAIN.py --simulate 1 --season 1 --days 7 --timestep 1 --ki 0.8 --network 4 --case 20 --flex 100 --delay 1 --tcl_control mixed --adoption 1.0 --target 33.33 --algorithm advanced_ldc --distribution per_house --ranking dynamic --resolution 3 &&
 
 
@@ -38,6 +38,20 @@ cd /home/pi/ldc_project/ldc_simulator/ && /home/pi/anaconda3/bin/python MAIN.py 
 
 # cd /home/pi/ldc_project/ldc_simulator/ && /home/pi/anaconda3/bin/python MAIN.py --simulate 1 --study hierarchy --season 1 --days 7 --timestep 3 --ki 32 --network 4 --case 300 --flex 100 --delay 1 --tcl_control direct --adoption 1 --target auto --algorithm basic_ldc --distribution per_house --ranking static  --resolution 0 &&
 
+
+### DER
+cd /home/pi/ldc_project/ldc_simulator/ && /home/pi/anaconda3/bin/python MAIN.py --simulate 1 --study DER --season 1 --days 2 --timestep 1 --ki 0.8 --network 4 --case 400 --flex 50 --delay 1 --tcl_control direct --adoption 0.0 --target 33.33 --algorithm no_ldc --distribution per_house --ranking static --resolution 3  --ev 0 --battery 0 --solar 0 --wind 0 &&
+cd /home/pi/ldc_project/ldc_simulator/ && /home/pi/anaconda3/bin/python MAIN.py --simulate 1 --study DER --season 1 --days 2 --timestep 1 --ki 0.8 --network 4 --case 401 --flex 50 --delay 1 --tcl_control direct --adoption 0.0 --target 33.33 --algorithm no_ldc --distribution per_house --ranking static --resolution 3  --ev 0.1 --battery 0 --solar 0 --wind 0 &&
+cd /home/pi/ldc_project/ldc_simulator/ && /home/pi/anaconda3/bin/python MAIN.py --simulate 1 --study DER --season 1 --days 2 --timestep 1 --ki 0.8 --network 4 --case 402 --flex 50 --delay 1 --tcl_control direct --adoption 0.0 --target 33.33 --algorithm no_ldc --distribution per_house --ranking static --resolution 3  --ev 0.2 --battery 0 --solar 0 --wind 0 &&
+cd /home/pi/ldc_project/ldc_simulator/ && /home/pi/anaconda3/bin/python MAIN.py --simulate 1 --study DER --season 1 --days 2 --timestep 1 --ki 0.8 --network 4 --case 403 --flex 50 --delay 1 --tcl_control direct --adoption 0.0 --target 33.33 --algorithm no_ldc --distribution per_house --ranking static --resolution 3  --ev 0.3 --battery 0 --solar 0 --wind 0 &&
+cd /home/pi/ldc_project/ldc_simulator/ && /home/pi/anaconda3/bin/python MAIN.py --simulate 1 --study DER --season 1 --days 2 --timestep 1 --ki 0.8 --network 4 --case 404 --flex 50 --delay 1 --tcl_control direct --adoption 0.0 --target 33.33 --algorithm no_ldc --distribution per_house --ranking static --resolution 3  --ev 0.4 --battery 0 --solar 0 --wind 0 &&
+cd /home/pi/ldc_project/ldc_simulator/ && /home/pi/anaconda3/bin/python MAIN.py --simulate 1 --study DER --season 1 --days 2 --timestep 1 --ki 0.8 --network 4 --case 501 --flex 50 --delay 1 --tcl_control direct --adoption 1.0 --target 33.33 --algorithm advanced_ldc --distribution per_house --ranking static --resolution 3  --ev 0.1 --battery 0 --solar 0 --wind 0 &&
+cd /home/pi/ldc_project/ldc_simulator/ && /home/pi/anaconda3/bin/python MAIN.py --simulate 1 --study DER --season 1 --days 2 --timestep 1 --ki 0.8 --network 4 --case 502 --flex 50 --delay 1 --tcl_control direct --adoption 1.0 --target 33.33 --algorithm advanced_ldc --distribution per_house --ranking static --resolution 3  --ev 0.2 --battery 0 --solar 0 --wind 0 &&
+cd /home/pi/ldc_project/ldc_simulator/ && /home/pi/anaconda3/bin/python MAIN.py --simulate 1 --study DER --season 1 --days 2 --timestep 1 --ki 0.8 --network 4 --case 503 --flex 50 --delay 1 --tcl_control direct --adoption 1.0 --target 33.33 --algorithm advanced_ldc --distribution per_house --ranking static --resolution 3  --ev 0.3 --battery 0 --solar 0 --wind 0 &&
+cd /home/pi/ldc_project/ldc_simulator/ && /home/pi/anaconda3/bin/python MAIN.py --simulate 1 --study DER --season 1 --days 2 --timestep 1 --ki 0.8 --network 4 --case 504 --flex 50 --delay 1 --tcl_control direct --adoption 1.0 --target 33.33 --algorithm advanced_ldc --distribution per_house --ranking static --resolution 3  --ev 0.4 --battery 0 --solar 0 --wind 0 &&
+
+
+# cd /home/pi/ldc_project/ldc_simulator/ && /home/pi/anaconda3/bin/python MAIN.py --simulate 1 --study DER --season 1 --days 2 --timestep 1 --ki 0.8 --network 4 --case 701 --flex 100 --delay 1 --tcl_control direct --adoption 0.0 --target 33.33 --algorithm no_ldc --distribution per_house --ranking static --resolution 3  --ev 0.0 --battery 0 --solar 0.3 --wind 0 &&
 
 
 

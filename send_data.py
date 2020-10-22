@@ -163,5 +163,6 @@ def main():
 
 
 if __name__ == '__main__':
+    time.sleep(60)  # delay to allow hardware bootup
     main()
 

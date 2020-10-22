@@ -43,6 +43,10 @@ if __name__ == '__main__':
     parser.add_option('--report', dest='report', default=0, help='show data during tests and troubleshooting')
     parser.add_option('--flex', dest='flex', default=100, help='weight for flexibility-based prioritization')
     parser.add_option('--study', dest='study', default='None', help='Simulation study')
+    parser.add_option('--ev', dest='ev', default='None', help='Adoption of ev')
+    parser.add_option('--battery', dest='battery', default='None', help='Adoption of battery')
+    parser.add_option('--solar', dest='solar', default='None', help='Adoption of solar')
+    parser.add_option('--wind', dest='wind', default='None', help='Adoption of wind')
 
     options, args = parser.parse_args(sys.argv[1:])
     report = int(options.report)
@@ -202,8 +206,31 @@ if __name__ == '__main__':
                 
                 
 
-                300:'basic_all_k32_auto',
-                301:'advanced_all_k32_auto'
+
+                400: 'ldc_0_ev_0',
+                401: 'ldc_0_ev_10',
+                402: 'ldc_0_ev_20',
+                403: 'ldc_0_ev_30',
+                404: 'ldc_0_ev_40',
+                405: 'ldc_0_ev_50',
+                406: 'ldc_0_ev_60',
+                407: 'ldc_0_ev_70',
+                408: 'ldc_0_ev_80',
+                409: 'ldc_0_ev_90',
+                410: 'ldc_0_ev_100',
+
+                501: 'ldc_100_ev_10',
+                502: 'ldc_100_ev_20',
+                503: 'ldc_100_ev_30',
+                504: 'ldc_100_ev_40',
+                505: 'ldc_100_ev_50',
+                506: 'ldc_100_ev_60',
+                507: 'ldc_100_ev_70',
+                508: 'ldc_100_ev_80',
+                509: 'ldc_100_ev_90',
+                610: 'ldc_100_ev_100',
+
+                701: 'ldc_0_solar_10',
 
                 }
 
@@ -296,14 +323,14 @@ if __name__ == '__main__':
         longitude = '174.77534779638677'
 
         dt = pd.date_range(start='2020-1-1 00:00:00', end='2021-1-1 00:00').tz_localize('Pacific/Auckland')
-        dt_start = [a for a in dt if a.week==dict_season_week[season]][1]  # week in the middle of season
+        dt_start = [a for a in dt if a.week==dict_season_week[season]][4]  # week in the middle of season, day of week
         start = dt_start.timestamp()
         devices_to_simulate = ['house', 'baseload', 
             'heatpump', 'heater', 'waterheater', 'fridge', 'freezer',   # thermostat controlled
             'clotheswasher', 'clothesdryer', 'dishwasher',              # non-thermostat controlled
-            'ev', 
+            # 'ev', 
             # 'storage',                                          # battery-based
-            'solar', 
+            # 'solar', 
             # 'wind'                                           # local generation
             ]
 
@@ -333,7 +360,41 @@ if __name__ == '__main__':
                 flex_percent=flex_percent, summary=True)
 
         elif study=='DER':
-            pass
+            app_per_house = dict(house=1, baseload=1, heatpump=0.61, heater=1.31, waterheater=0.8,
+                fridge=1.31, freezer=0.5, clotheswasher=1.08, clothesdryer=0.7816, dishwasher=0.6931, 
+                ev=float(options.ev), storage=float(options.battery), solar=float(options.solar), wind=float(options.wind))
+
+            devices_to_simulate = [x for x in app_per_house.keys() if app_per_house[x]>0]
+            ldc_devices = [x for x in devices_to_simulate if x not in ['house', 'baseload', 'solar', 'wind']]
+
+            n_ldc = float(options.a)
+            dict_devices = {k:{'n_units':int(n_units*app_per_house[k]), 'n_ldc': (k in ldc_devices)*int(n_units*n_ldc*app_per_house[k])} for k in devices_to_simulate}
+
+            # dict_devices['heatpump']['n_ldc'] = int(n_units*n_ldc*app_per_house['heatpump'])
+            # dict_devices['fridge']['n_ldc'] = int(n_units*n_ldc*app_per_house['fridge'])
+            # dict_devices['freezer']['n_ldc'] = int(n_units*n_ldc*app_per_house['freezer'])
+            # dict_devices['heater']['n_ldc'] = int(n_units*n_ldc*app_per_house['heater'])
+            # dict_devices['waterheater']['n_ldc'] = int(n_units*n_ldc*app_per_house['waterheater'])
+            # dict_devices['ev']['n_ldc'] = int(n_units*n_ldc*app_per_house['ev'])
+
+            print('Running setup...')
+            for k, v in dict_devices.items(): 
+                print(k, v)
+            print(f'timestamp:{start}')
+            print(f'latitude:{latitude}')
+            print(f'longitude:{longitude}')
+            print(f'profile index:{start_idx}')
+            print(f'device_ip:{device_ip}')
+            print(f'case:{case}')
+            print(f'season:{season}')  
+            local_ip = get_local_ip()          
+            A = Aggregator(dict_devices, timestamp=start, latitude=latitude, longitude=longitude, 
+                idx=start_idx, local_ip=local_ip, device_ip=device_ip, step_size=step_size, simulation=simulation, 
+                endstamp=start+int(ndays*3600*24)-1, case=case, network=network, casefolder=casefolder, 
+                algorithm=algorithm, target=target, distribution=distribution, ranking=ranking, 
+                resolution=resolution, ki=ki, tcl_control=tcl_control, delay=delay, report=report, 
+                flex_percent=flex_percent, summary=True)
+
         
         elif study=='hierarchy':
             ldc_loads = {

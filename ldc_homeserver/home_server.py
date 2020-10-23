@@ -401,7 +401,9 @@ def update_graph(json_data):
             list_params = [a for a in df_data.columns 
                                 if ((a.lower().endswith('status')) 
                                     and not (a.lower().startswith('window')) 
-                                    and not (a.lower().startswith('door')))]
+                                    and not (a.lower().startswith('door'))
+                                    )
+                            ]
 
             i = 0
             for param in list_params:

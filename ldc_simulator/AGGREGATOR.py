@@ -2367,12 +2367,11 @@ class Aggregator(multiprocessing.Process):
                 subnet = '.'.join(self.local_ip.split('.')[:-1])
 
                 ### scan for peers
-                peers = {}
-                [peers.update(MULTICAST.send(dict_msg={'states':'all'}, ip=f'{subnet}.{100+x}', port=17001, timeout=0.1, data_bytes=4096, hops=1)) for x in range(30)]
-                peer_address = [k for k, v in peers.items() if (v and not (k.endswith('.101')))]
-                print(f"Peers:{peer_address}")
                 peer_states = {}
-
+                [peer_states.update(MULTICAST.send(dict_msg={'states':'all'}, ip=f'{subnet}.{x}', port=17001, timeout=0.1, data_bytes=4096, hops=1)) for x in range(100, 114)]
+                peer_address = [k for k, v in peer_states.items() if (v and not (k.endswith('.100') or k.endswith('.101')))]
+                print(f"Peers:{peer_address}")
+                
                 while True:
                     try:
                         ### get data from local process
@@ -2386,7 +2385,7 @@ class Aggregator(multiprocessing.Process):
                         
                         self.dict_summary_demand = dict_agg['summary']['demand'] 
                         ### get peer states
-                        self.dict_state = {}  # to ensure old data is not carried over when no update is available
+                        self.dict_state = dict_agg['states']
                         [peer_states.update(MULTICAST.send(dict_msg={'states':'all'}, ip=ip, port=17001, timeout=0.1, data_bytes=4096, hops=1)) for ip in peer_address]
                         for address, state in peer_states.items():
                             self.dict_state.update(state)
@@ -2441,10 +2440,9 @@ class Aggregator(multiprocessing.Process):
                             self.compress_pickle(path=f'/home/pi/ldc_project/history/H{self.house_num}_{last_day}.pkl')
                         last_day = self.dict_common['today']
 
-                        ### update peer list 
-                        if self.dict_common['unixtime'] % 60 < 1:
-                            peers.update(MULTICAST.send(dict_msg={'states':'all'}, ip='224.0.2.0', port=17000, timeout=0.3, data_bytes=4096, hops=1))
-                            peer_address = [k for k, v in peers.items() if (v and not (k.endswith('.101')))]
+                        ### update state of other devices, e.g., doors, windows
+                        if (self.dict_common['unixtime'] % 15 < 1) and (self.house_num==1):
+                            peer_states.update(MULTICAST.send(dict_msg={'states':'all'}, ip='224.0.2.0', port=17000, timeout=0.3, data_bytes=4096, hops=1))
                             
                         self.pipe_agg_grainy1.send({'emulated_demand': {'grainy': grainy, 'chroma': chroma}})
                         time.sleep(self.pause)

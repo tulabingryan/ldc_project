@@ -208,7 +208,6 @@ class Aggregator(multiprocessing.Process):
 
         ### create house data
         if 'house' in self.dict_devices.keys():
-            n_house = self.dict_devices['house']['n_units']
             n_units = self.dict_devices['house']['n_units']
             idx = self.idx
             with pd.HDFStore('./specs/device_specs.h5', 'r') as store:
@@ -382,13 +381,6 @@ class Aggregator(multiprocessing.Process):
                             self.target_loading = 10.0
 
                     
-                    # delta_hz = abs(f1 - f0)
-                    # delta_p = abs(p1-p0)
-                    # if delta_hz!=0: 
-                    #   dpdf = delta_p / delta_hz
-                    #   k_offset = 1.0 - dpdf  # target kw/hz - actual
-                    #   self.injector_gain = np.clip(self.injector_gain + (k_offset*decay), a_min=8, a_max=128)
-                    #   # self.dict_common['injector_gain'] = self.injector_gain
 
                     self.dict_common['target_percent'] = self.target_loading
                     injector_data = ldc_injector(ldc_signal=self.dict_common['ldc_signal'], 
@@ -408,15 +400,6 @@ class Aggregator(multiprocessing.Process):
                     # delayed_signal = np.clip(injector_data['ldc_signal'] - (self.delay*(injector_data['ldc_signal']-self.dict_common['ldc_signal'])/self.dict_common['step_size']), a_min=0, a_max=100)
                     self.dict_common.update(injector_data)
                     
-                    # p0 = p1
-                    # f0 = f1
-                    # p1 = self.dict_common['loading_percent']
-                    # f1 = self.dict_common['ldc_signal']
-                    # ewma = (0.99*p1) + ((0.01)*ewma)
-
-                    
-                    # if self.dict_common['minute']!=tprint:
-                    #   tprint=self.dict_common['minute']
                     print(self.dict_common['isotime'], 
                         'ldc_signal:', np.round(self.dict_common['ldc_signal'],3), 
                         # 'K:', np.round(self.injector_gain, 3),
@@ -434,7 +417,8 @@ class Aggregator(multiprocessing.Process):
                     t1 = time.perf_counter()
 
 
-                    if self.dict_common['unixtime'] >= self.endstamp: raise KeyboardInterrupt          
+                    if self.dict_common['unixtime'] >= self.endstamp: # end simulation
+                        raise KeyboardInterrupt          
                 else:
                     ### Retrieve data from IOs
                     self.ready_agg = multiprocessing.connection.wait(self.agg_observer, timeout=0)
@@ -459,8 +443,7 @@ class Aggregator(multiprocessing.Process):
                 time.sleep(self.pause)
             except Exception as e:
                 print(f'Error AGGREGATOR.autorun:{e}')
-                raise KeyboardInterrupt
-
+                
             except KeyboardInterrupt:
                 ### send stop signal to device simulators
                 for c in self.common_observer:
@@ -695,7 +678,6 @@ class Aggregator(multiprocessing.Process):
 
     def ldc_listener(self):
         ''' Get ldc_signal'''
-        # print("Running ldc_listener...")
         ip = '224.0.2.0'
         port = 17000
         timeout = 0.5
@@ -2367,7 +2349,7 @@ class Aggregator(multiprocessing.Process):
         while active:
             try:
                 time.sleep(15)  # delay 15 seconds to allow hardware to bootup
-
+                ### setup raspi
                 import serial
                 import pifacedigitalio
                 import RPi.GPIO as GPIO
@@ -2377,12 +2359,18 @@ class Aggregator(multiprocessing.Process):
                 self.pf = pifacedigitalio.PiFaceDigital()
                 self.df_relay, self.df_states = FUNCTIONS.create_states(report=False)  # create power levels based on resistor bank
                 print('piface setup successfull...')
-
+                
+                ### declare variables 
                 self.dict_history = {}
                 dict_agg = {}
                 last_day = datetime.datetime.now().strftime("%Y_%m_%d")
-                
-                peers = MULTICAST.send(dict_msg={'config':'all'}, ip='224.0.2.0', port=17000, timeout=1.0, data_bytes=4096, hops=1)
+                subnet = '.'.join(self.local_ip.split('.')[:-1])
+
+                ### scan for peers
+                peers = {}
+                [peers.update(MULTICAST.send(dict_msg={'states':'all'}, ip=f'{subnet}.{100+x}', port=17001, timeout=0.1, data_bytes=4096, hops=1)) for x in range(30)]
+                peer_address = [k for k, v in peers.items() if (v and not (k.endswith('.100') or k.endswith('.101')))]
+                print(f"Peers:{peer_address}")
                 peer_states = {}
 
                 while True:
@@ -2398,12 +2386,14 @@ class Aggregator(multiprocessing.Process):
                             raise KeyboardInterrupt
                         
                         self.dict_summary_demand = dict_agg['summary']['demand'] 
-                        ### query demand from network devices to be emulated in the grainy load
-                        # peer_demands = MULTICAST.send(dict_msg={'summary':'demand'}, ip='224.0.2.0', port=17000, timeout=0.3, data_bytes=4096, hops=1)
-                        # for address, demand in peer_demands.items():
-                        #     for k, v in demand.items():
-                        #         if k.endswith('actual_demand'):
-                        #             self.dict_summary_demand.update({k:float(v)})
+                        ### get peer states
+                        self.dict_state = {}  # to ensure old data is not carried over when no update is available
+                        [peer_states.update(MULTICAST.send(dict_msg={'states':'all'}, ip=ip, port=17001, timeout=0.1, data_bytes=4096, hops=1)) for ip in peer_address]
+                        for address, state in peer_states.items():
+                            self.dict_state.update(state)
+                            for k, v in state.items():
+                                if k.endswith('actual_demand'):
+                                    self.dict_summary_demand.update({k:float(v)})
 
                         ### add all demand except heatpump and waterheater demand
                         total = np.sum([np.sum(self.dict_summary_demand[k]) for k in self.dict_summary_demand.keys() if not (k.startswith('heatpump') or k.startswith('waterheater'))])
@@ -2411,8 +2401,7 @@ class Aggregator(multiprocessing.Process):
 
                         ### convert total load value into 8-bit binary to drive 8 pinouts of piface
                         newpins, grainy, chroma = FUNCTIONS.relay_pinouts(total, self.df_relay, self.df_states, report=False)
-                        # newpins, grainy, chroma = FUNCTIONS.pinouts(total, self.df_states, report=False)
-                        '''Note: chroma load does the finer load emulation, i.e., <50W'''
+                        
                         ### execute piface command
                         for i in range(len(self.pins)):
                             if self.pins[i]==0 and newpins[i]==1:
@@ -2438,15 +2427,12 @@ class Aggregator(multiprocessing.Process):
                             rs232.write(cmd.encode())
                             rs232.write(b'LOAD ON\r\n')
 
-                        ### get peer states
-                        self.dict_state = {}  # to ensure old data is not carried over when no update is available
-                        peer_states = MULTICAST.send(dict_msg={'states':'all'}, ip='224.0.2.0', port=17000, timeout=0.4, data_bytes=4096, hops=1)
+                        
+                        ### update meter reading
+                        peer_states.update(MULTICAST.send(dict_msg={'states':'all'}, ip=f'{subnet}.101', port=17001, timeout=0.1, data_bytes=4096, hops=1))
                         for address, state in peer_states.items():
                             self.dict_state.update(state)
-                            # for k, v in state.items():
-                            #     if k.endswith('actual_demand'):
-                            #         self.dict_summary_demand.update({k:float(v)})
-
+                            
                         ### save all states
                         self.dict_state.update({"unixtime": self.dict_common['unixtime'] })
                         self.dict_history.update({self.dict_common['unixtime']: self.dict_state})            
@@ -2456,7 +2442,11 @@ class Aggregator(multiprocessing.Process):
                             self.compress_pickle(path=f'/home/pi/ldc_project/history/H{self.house_num}_{last_day}.pkl')
                         last_day = self.dict_common['today']
 
-
+                        ### update peer list 
+                        if self.dict_common['unixtime'] % 60 < 1:
+                            peers.update(MULTICAST.send(dict_msg={'states':'all'}, ip='224.0.2.0', port=17000, timeout=0.3, data_bytes=4096, hops=1))
+                            peer_address = [k for k, v in peers.items() if (v and not (k.endswith('.100') or k.endswith('.101')))]
+                            
                         self.pipe_agg_grainy1.send({'emulated_demand': {'grainy': grainy, 'chroma': chroma}})
                         time.sleep(self.pause)
                     except KeyboardInterrupt:

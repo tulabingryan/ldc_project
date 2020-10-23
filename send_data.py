@@ -12,7 +12,6 @@ from optparse import OptionParser
 
 
 def get_file_list(path='*.*'):
-    last_edit = os.stat(p).st_mtime
     return glob.glob(path)
 
     
@@ -91,7 +90,6 @@ def sync_files(dict_paths, remove_source=False, options='-auhe'):
 
 def get_local_ip(report=False):
     # get local ip address
-    count = 0
     local_ip = '127.0.0.1'
     while True:
         try:
@@ -101,6 +99,7 @@ def get_local_ip(report=False):
             s.close()
             break
         except Exception as e:
+            print(f"Error get_local_ip:{e}")
             time.sleep(1)
 
     if report: 

@@ -8,12 +8,12 @@ Year: 2017 - 2020
 Thesis: Localized Demand Control for Local Grids with Limited Resources
 Generic model:
 
-                             _________________Se_________________ 
-                            |                                    |
+                           _________________Se_________________ 
+                          |                                    |
      __________   A1   ___|/____   A2   __________        _____|_________
     |  Dongle  |----->| Device |----->|  End-use |  Se  |  Environment |
     |__________|<-----|________|<-----|__________|<-----|______________|
-         /|        S1     |  /|      S2    |    /|                |
+       /|        S1     |  /|      S2    |    /|                |
         |A0           S4|   |A4        S3|/____|A3              |
      ___|_______       _|/__|____      | Person |               |
     |  LDC     |  S5  |  Local  |      |________|               |
@@ -64,9 +64,8 @@ def get_local_ip():
             s.close()
             break
         except Exception as e:
+            print("Error in get_local_ip: ", e)
             time.sleep(3)
-            # print("Error in get_local_ip: ", e)
-            pass
         except KeyboardInterrupt:
             break
     return local_ip

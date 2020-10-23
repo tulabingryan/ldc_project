@@ -1186,9 +1186,9 @@ class Aggregator(multiprocessing.Process):
             dict_house=self.dict_house, 
             idx=self.idx, distribution=self.distribution))
         
-        ip = '224.0.2.0'
-        port = 17000
-        timeout = 0.5
+        ip = f"{'.'.join(self.local_ip.split('.')[:-1])}.113"
+        port = 17001
+        timeout = 0.2
         ### initialize water valves    
         n_units = self.dict_devices['waterheater']['n_units']
         self.dict_valve.update(initialize_device(n_parent=n_units, 
@@ -1286,15 +1286,8 @@ class Aggregator(multiprocessing.Process):
                     ### get actual readings  
                     response = MULTICAST.send(dict_msg={"pcsensor":"temp_in"}, ip=ip, port=port, timeout=timeout, hops=1)
                     if response:
-                        for k, v in response.items():
-                            ip = k
-                            port = 17001
-                            timeout = 0.1
-                            self.dict_waterheater['temp_in'][0] = v
-                    else:
-                        ip = '224.0.2.0'
-                        port = 17000
-                        timeout = 0.5
+                        self.dict_waterheater['temp_in'][0] = response[ip]
+                    
                     time.sleep(1)
 
                     ### execute status

@@ -397,19 +397,14 @@ class Aggregator(multiprocessing.Process):
                         min_d=self.dict_common['min_d'],
                         K=self.injector_gain)
                     
-                    # delayed_signal = np.clip(injector_data['ldc_signal'] - (self.delay*(injector_data['ldc_signal']-self.dict_common['ldc_signal'])/self.dict_common['step_size']), a_min=0, a_max=100)
                     self.dict_common.update(injector_data)
                     
                     print(self.dict_common['isotime'], 
                         'ldc_signal:', np.round(self.dict_common['ldc_signal'],3), 
-                        # 'K:', np.round(self.injector_gain, 3),
-                        # 'dp/df:', np.round((dpdf), 3),
-                        # 'delayed_signal:', np.round(delayed_signal, 3), 
                         'timeit:', np.round((time.perf_counter()-t1), 5), 
                         'target:', np.round(self.target_loading,3), 
                         'latest:', np.round(self.dict_common['loading_percent'],3), 
                         'factor:', np.round(factor,6), 
-                        # 'pf:', np.round(pf, 4),
                         'tcl_control:', self.dict_common['tcl_control'],
                         'case:', self.case
                         )

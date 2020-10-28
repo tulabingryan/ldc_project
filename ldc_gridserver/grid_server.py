@@ -427,6 +427,7 @@ tcp_ip = '192.168.1.3'
 tcp_port = 10000
 capacity = 30000  # [W]
 dict_cmd = {}
+today = datetime.datetime.now().day
 
 while len(dict_cmd.keys())<=0:
     try:
@@ -740,6 +741,7 @@ def update_data(n_intervals, history_range, json_data, graph_data):
     global refresh_rate, gain, dict_cmd, dict_agg, cmd_algorithm, cmd_target_watt, ldc_signal, latest_demand
     try:
         t = time.perf_counter()
+        
         if history_range in ['Last 15 Minutes', 'Last 30 Minutes', 'Last 1 Hour', 'Last 2 Hours', 'Last 6 Hours', 'Last 12 Hours', 'Last 24 Hours']:
             day = datetime.datetime.now().strftime('%Y_%m_%d')
             
@@ -762,7 +764,7 @@ def update_data(n_intervals, history_range, json_data, graph_data):
         #     df_data = pd.read_json(json_data, orient='split').astype(float)
         # else:
         df_data = get_data(unixstart=unixstart, unixend=unixend)
-        print(df_data)
+        
         # ### get upperbound data
         # if unixend > df_data['unixtime'].max():
         #     s = df_data['unixtime'].max()
@@ -787,7 +789,6 @@ def update_data(n_intervals, history_range, json_data, graph_data):
         df_data = df_data.resample(sample).mean().interpolate().reset_index(drop=True)
         df_data['target_kw'] = df_data['target_watt'] * 1e-3
         # print("update_data dt:", time.perf_counter() - t)
-        
         return df_data.to_json(orient='split')
     except Exception as e:
         print(f'Error update_data: {e}')
@@ -833,7 +834,7 @@ def update_graph(history_range, json_data):
         t = time.perf_counter()
         if json_data:
             df_data = pd.read_json(json_data, orient='split') 
-            # print("json read:", time.perf_counter()-t)
+            
             t = time.perf_counter()
             df_data = df_data[(df_data['unixtime']>=unixstart)&(df_data['unixtime']<=unixend)] 
             df_data.index = pd.to_datetime(df_data['unixtime'].values, unit='s').tz_localize('UTC').tz_convert('Pacific/Auckland') #[pd.to_datetime(a, unit='s').tz_localize('UTC').tz_convert('Pacific/Auckland').isoformat() for a in df_data['unixtime']]
@@ -841,6 +842,7 @@ def update_graph(history_range, json_data):
             # print("data pruning and changing index:", time.perf_counter()-t)
             t = time.perf_counter()
             
+
             ### TOTAL POWER ### 
             trace_actual = go.Scattergl(
                 x = df_data.index, 
@@ -926,7 +928,7 @@ def update_graph(history_range, json_data):
 
 
             ### PHASE POWER ###
-            list_phase_power = [a for a in df_data.columns if a.lower().startswith('power_kw_')]
+            list_phase_power = [a for a in df_data.columns if (a.lower().startswith('power_active_') or a.lower().startswith('power_kw_'))]
             traces_phase_power = []
             i = 0
             for p in list_phase_power:

@@ -74,9 +74,9 @@ def main():
   while True:
     try:
       for h in target_hosts:
-        print(h)
+        print(f'{h} sync start...')
         sync_folders(from_path='/home/pi/ldc_project/', to_host='pi@'+h, to_path='/home/pi/ldc_project/', ssh_password="ldc")
-      
+        print(f'{h} updated!')
       break
     except Exception as e:
       print("Error:", e)

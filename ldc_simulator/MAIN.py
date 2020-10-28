@@ -506,6 +506,7 @@ if __name__ == '__main__':
             dict_devices = {
             'house':{'n_units':int(n_units), 'n_ldc': int(n_units*n_ldc)},
             'baseload':{'n_units':int(n_units), 'n_ldc': int(n_units*n_ldc)},
+            'heatpump':{'n_units':int(n_units), 'n_ldc': int(n_units*n_ldc)},
             # 'heater':{'n_units':int(n_units), 'n_ldc': int(n_units*n_ldc)},  # no heater in Ardmore to avoid adding cooling load to heatpumps
             'fridge':{'n_units':int(n_units), 'n_ldc': int(n_units*n_ldc)},
             'freezer':{'n_units':int(n_units), 'n_ldc': int(n_units*n_ldc)},            
@@ -520,11 +521,11 @@ if __name__ == '__main__':
         #     'ev':{'n_units':int(n_units), 'n_ldc': int(n_units*n_ldc), 'v2g':int(n_units)},
         #     }
 
-        elif device_ip==111:
-            dict_devices = {
-            'house':{'n_units':int(n_units), 'n_ldc': int(n_units*n_ldc)},
-            'heatpump':{'n_units':int(n_units), 'n_ldc': int(n_units*n_ldc)},
-            }
+        # elif device_ip==111:
+        #     dict_devices = {
+        #     'house':{'n_units':int(n_units), 'n_ldc': int(n_units*n_ldc)},
+        #     'heatpump':{'n_units':int(n_units), 'n_ldc': int(n_units*n_ldc)},
+        #     }
         elif device_ip==112:
             dict_devices = {
             'house':{'n_units':int(n_units), 'n_ldc': int(n_units*n_ldc)},

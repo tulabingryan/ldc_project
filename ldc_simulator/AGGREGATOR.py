@@ -23,7 +23,7 @@ class Aggregator(multiprocessing.Process):
         simulation=0, endstamp=None, case=None, casefolder='assorted', network=None, 
         algorithm='no_ldc', target='auto', distribution='per_house', ranking='static', 
         resolution=3, ki=32, save_history=True, tcl_control='direct', delay=0.0, 
-        report=False, flex_percent=100, summary=False):
+        report=False, flex_percent=50, summary=False):
         super(Aggregator, self).__init__()
         multiprocessing.Process.__init__(self)
         self.daemon = True
@@ -356,7 +356,7 @@ class Aggregator(multiprocessing.Process):
                         self.pipe_agg_network0.send({'summary_demand':{'p_mw':p_mw}, 'common':self.dict_common})       
                 
                     if self.pipe_agg_network0.poll():
-                        grid_data = self.pipe_agg_network0.recv()
+                        grid_data = self.pipe_agg_network0.recv()  # to empty pipe
                         # factor = (factor*0.99) + (np.mean(grid_data['factor']) * 0.01)
                         # sn_mva = np.mean(grid_data['sn_mva'])
                         # pf = np.mean(grid_data['pf'])
@@ -371,14 +371,19 @@ class Aggregator(multiprocessing.Process):
 
 
                     elif self.target=='tou':
-                        if self.dict_common['minute']<15:
-                            self.target_loading = 5.0
-                        elif self.dict_common['minute']>=15 and self.dict_common['minute']<30:
-                            self.target_loading = 10.0
-                        elif self.dict_common['minute']>=30 and self.dict_common['minute']<45:
-                            self.target_loading = 15.0
-                        elif self.dict_common['minute']>=45 and self.dict_common['minute']<60:
-                            self.target_loading = 10.0
+                        if (self.dict_common['hour']>=18) and (self.dict_common['hour']<=21):
+                            self.target_loading = 15
+                        else:
+                            self.target_loading = 30
+
+                        # if self.dict_common['minute']<15:
+                        #     self.target_loading = 5.0
+                        # elif self.dict_common['minute']>=15 and self.dict_common['minute']<30:
+                        #     self.target_loading = 10.0
+                        # elif self.dict_common['minute']>=30 and self.dict_common['minute']<45:
+                        #     self.target_loading = 15.0
+                        # elif self.dict_common['minute']>=45 and self.dict_common['minute']<60:
+                        #     self.target_loading = 10.0
 
                     
 
@@ -557,13 +562,14 @@ class Aggregator(multiprocessing.Process):
                 net = convert_to_3ph(net)
                 net.asymmetric_load = net.asymmetric_load.head(60)
 
-            capacity = (self.dict_devices['house']['n_units'] * 5e3) * 1e-6
+            # capacity = (self.dict_devices['house']['n_units'] * 5e3) * 1e-6
             self.dict_network = {'ldc_signal':100}
         
 
-            factor = np.ones(self.dict_devices['house']['n_units'])
+            # factor = np.ones(self.dict_devices['house']['n_units'])
             pf = 0.9 # assumed powerfactor
 
+            
             dict_agg = {}
             dict_save_trafo = {}
             dict_save_bus = {}
@@ -585,10 +591,11 @@ class Aggregator(multiprocessing.Process):
                     net.asymmetric_load['q_a_mvar'] = np.multiply(net.asymmetric_load['p_a_mw'], np.sin(np.arccos(pf)))
                     net.asymmetric_load['q_b_mvar'] = np.multiply(net.asymmetric_load['p_b_mw'], np.sin(np.arccos(pf)))
                     net.asymmetric_load['q_c_mvar'] = np.multiply(net.asymmetric_load['p_c_mw'], np.sin(np.arccos(pf)))
+                    
                     ### simulate network
                     runpp_3ph(net, numba=True, #recycle={'_is_elements':True, 'ppc':True, 'Ybus':True}, 
                         max_iteration=10)
-                 
+                    
                     ### send result to main routine
                     trafo_data = net.res_trafo_3ph.to_dict(orient='records')[0]
                     bus_data = net.res_bus_3ph.loc[net.trafo['lv_bus'], :].to_dict(orient='list')
@@ -617,54 +624,65 @@ class Aggregator(multiprocessing.Process):
                  
                     ### collect data for saving
                     if self.save_history:
-                        # dict_save_trafo.update({int(self.dict_common['unixtime']):trafo_data})
-                        # dict_save_bus.update({int(self.dict_common['unixtime']):bus_data})
-                        # dict_save_line.update({int(self.dict_common['unixtime']):line_data})
-                        # dict_save_load.update({self.dict_common['unixtime']:load_data})
+                        dict_save_trafo.update({int(self.dict_common['unixtime']):trafo_data})
+                        dict_save_bus.update({int(self.dict_common['unixtime']):bus_data})
+                        dict_save_line.update({int(self.dict_common['unixtime']):line_data})
+                        dict_save_load.update({self.dict_common['unixtime']:load_data})
+
                         dict_save_trafo.update({self.dict_common['unixtime']:trafo_data})
                         
-                        dict_save_bus.update({self.dict_common['unixtime']:{
-                                # 'vm_a_pu': ','.join(np.char.zfill(np.round(bus_data['vm_a_pu'], 6).astype(str), 10)),
-                                # 'vm_b_pu': ','.join(np.char.zfill(np.round(bus_data['vm_b_pu'], 6).astype(str), 10)),
-                                # 'vm_c_pu': ','.join(np.char.zfill(np.round(bus_data['vm_c_pu'], 6).astype(str), 10)),
-                                # 'va_a_degree': ','.join(np.char.zfill(np.round(bus_data['va_a_degree'], 6).astype(str), 10)),
-                                # 'va_b_degree': ','.join(np.char.zfill(np.round(bus_data['va_b_degree'], 6).astype(str), 10)),
-                                # 'va_c_degree': ','.join(np.char.zfill(np.round(bus_data['va_c_degree'], 6).astype(str), 10)),
-                                'unbalance_percent': ','.join(np.char.zfill(np.round(bus_data['unbalance_percent'], 6).astype(str), 10)),
-                                }})
+                        # dict_save_bus.update({self.dict_common['unixtime']:{
+                        #         # 'vm_a_pu': ','.join(np.char.zfill(np.round(bus_data['vm_a_pu'], 6).astype(str), 10)),
+                        #         # 'vm_b_pu': ','.join(np.char.zfill(np.round(bus_data['vm_b_pu'], 6).astype(str), 10)),
+                        #         # 'vm_c_pu': ','.join(np.char.zfill(np.round(bus_data['vm_c_pu'], 6).astype(str), 10)),
+                        #         # 'va_a_degree': ','.join(np.char.zfill(np.round(bus_data['va_a_degree'], 6).astype(str), 10)),
+                        #         # 'va_b_degree': ','.join(np.char.zfill(np.round(bus_data['va_b_degree'], 6).astype(str), 10)),
+                        #         # 'va_c_degree': ','.join(np.char.zfill(np.round(bus_data['va_c_degree'], 6).astype(str), 10)),
+                        #         'unbalance_percent': ','.join(np.char.zfill(np.round(bus_data['unbalance_percent'], 6).astype(str), 10)),
+                        #         }})
 
                         
-                        dict_save_line.update({self.dict_common['unixtime']:{
-                            # 'loading_percentA': ','.join(np.char.zfill(np.round(line_data['loading_percentA'], 6).astype(str), 10)),
-                            # 'loading_percentB': ','.join(np.char.zfill(np.round(line_data['loading_percentB'], 6).astype(str), 10)),
-                            # 'loading_percentC': ','.join(np.char.zfill(np.round(line_data['loading_percentC'], 6).astype(str), 10)),
-                            'loading_percent': ','.join(np.char.zfill(np.round(line_data['loading_percent'], 6).astype(str), 10)),
-                            }})
+                        # dict_save_line.update({self.dict_common['unixtime']:{
+                        #     # 'loading_percentA': ','.join(np.char.zfill(np.round(line_data['loading_percentA'], 6).astype(str), 10)),
+                        #     # 'loading_percentB': ','.join(np.char.zfill(np.round(line_data['loading_percentB'], 6).astype(str), 10)),
+                        #     # 'loading_percentC': ','.join(np.char.zfill(np.round(line_data['loading_percentC'], 6).astype(str), 10)),
+                        #     'loading_percent': ','.join(np.char.zfill(np.round(line_data['loading_percent'], 6).astype(str), 10)),
+                        #     }})
                         
-                        dict_save_load.update({self.dict_common['unixtime']:{
-                            'p_a_mw': ','.join(np.char.zfill(np.round(load_data['p_a_mw'], 6).astype(str), 10)),
-                            'p_b_mw': ','.join(np.char.zfill(np.round(load_data['p_b_mw'], 6).astype(str), 10)),
-                            'p_c_mw': ','.join(np.char.zfill(np.round(load_data['p_c_mw'], 6).astype(str), 10)),
-                            'q_a_mvar': ','.join(np.char.zfill(np.round(load_data['q_a_mvar'], 6).astype(str), 10)),
-                            'q_b_mvar': ','.join(np.char.zfill(np.round(load_data['q_b_mvar'], 6).astype(str), 10)),
-                            'q_c_mvar': ','.join(np.char.zfill(np.round(load_data['q_c_mvar'], 6).astype(str), 10)),
-                            }})
+                        # dict_save_load.update({self.dict_common['unixtime']:{
+                        #     'p_a_mw': ','.join(np.char.zfill(np.round(load_data['p_a_mw'], 6).astype(str), 10)),
+                        #     'p_b_mw': ','.join(np.char.zfill(np.round(load_data['p_b_mw'], 6).astype(str), 10)),
+                        #     'p_c_mw': ','.join(np.char.zfill(np.round(load_data['p_c_mw'], 6).astype(str), 10)),
+                        #     'q_a_mvar': ','.join(np.char.zfill(np.round(load_data['q_a_mvar'], 6).astype(str), 10)),
+                        #     'q_b_mvar': ','.join(np.char.zfill(np.round(load_data['q_b_mvar'], 6).astype(str), 10)),
+                        #     'q_c_mvar': ','.join(np.char.zfill(np.round(load_data['q_c_mvar'], 6).astype(str), 10)),
+                        #     }})
 
                         if (len(dict_save_trafo.keys())>=self.save_interval) and (self.case!=None):
-                            dict_save_trafo = save_data(dict_save_trafo, case=self.case,  folder=self.casefolder, filename=f'trafo.h5')
-                            dict_save_bus = save_data(dict_save_bus, case=self.case,  folder=self.casefolder, filename=f'bus.h5')
-                            dict_save_line = save_data(dict_save_line, case=self.case,  folder=self.casefolder, filename=f'line.h5')
-                            dict_save_load = save_data(dict_save_load, case=self.case,  folder=self.casefolder, filename=f'load.h5')
+                            dict_save_trafo = save_pickle(dict_save_trafo, path=f'/home/pi/studies/results/{casefolder}/{case}/trafo.pkl')
+                            dict_save_bus = save_pickle(dict_save_bus, path=f'/home/pi/studies/results/{casefolder}/{case}/bus.pkl')
+                            dict_save_line = save_pickle(dict_save_line, path=f'/home/pi/studies/results/{casefolder}/{case}/line.pkl')
+                            dict_save_load = save_pickle(dict_save_load, path=f'/home/pi/studies/results/{casefolder}/{case}/load.pkl')
+
+                            # dict_save_trafo = save_data(dict_save_trafo, case=self.case,  folder=self.casefolder, filename=f'trafo.h5')
+                            # dict_save_bus = save_data(dict_save_bus, case=self.case,  folder=self.casefolder, filename=f'bus.h5')
+                            # dict_save_line = save_data(dict_save_line, case=self.case,  folder=self.casefolder, filename=f'line.h5')
+                            # dict_save_load = save_data(dict_save_load, case=self.case,  folder=self.casefolder, filename=f'load.h5')
                         
                     time.sleep(self.pause)
                 except Exception as e:
                     print("Error AGGREGATOR.network:{}".format(e))
                 except KeyboardInterrupt:
                     if self.simulation==1 and self.save_history:
-                        dict_save_trafo = save_data(dict_save_trafo, case=self.case,  folder=self.casefolder, filename=f'trafo.h5')
-                        dict_save_bus = save_data(dict_save_bus, case=self.case,  folder=self.casefolder, filename=f'bus.h5')
-                        dict_save_line = save_data(dict_save_line, case=self.case,  folder=self.casefolder, filename=f'line.h5')
-                        dict_save_load = save_data(dict_save_load, case=self.case,  folder=self.casefolder, filename=f'load.h5')
+                        dict_save_trafo = save_pickle(dict_save_trafo, path=f'/home/pi/studies/results/{casefolder}/{case}/trafo.pkl.xz')
+                        dict_save_bus = save_pickle(dict_save_bus, path=f'/home/pi/studies/results/{casefolder}/{case}/bus.pkl.xz')
+                        dict_save_line = save_pickle(dict_save_line, path=f'/home/pi/studies/results/{casefolder}/{case}/line.pkl.xz')
+                        dict_save_load = save_pickle(dict_save_load, path=f'/home/pi/studies/results/{casefolder}/{case}/load.pkl.xz')
+
+                        # dict_save_trafo = save_data(dict_save_trafo, case=self.case,  folder=self.casefolder, filename=f'trafo.h5')
+                        # dict_save_bus = save_data(dict_save_bus, case=self.case,  folder=self.casefolder, filename=f'bus.h5')
+                        # dict_save_line = save_data(dict_save_line, case=self.case,  folder=self.casefolder, filename=f'line.h5')
+                        # dict_save_load = save_data(dict_save_load, case=self.case,  folder=self.casefolder, filename=f'load.h5')
                         
                     print(f'Terminating grid simulator...')
                     self.pipe_agg_network1.close()
@@ -2356,7 +2374,7 @@ class Aggregator(multiprocessing.Process):
 
                 ### scan for peers
                 peer_states = {}
-                [peer_states.update(MULTICAST.send(dict_msg={'states':'all'}, ip=f'{subnet}.{x}', port=17001, timeout=0.1, data_bytes=4096, hops=1)) for x in range(100, 114)]
+                [peer_states.update(MULTICAST.send(dict_msg={'states':'all'}, ip=f'{subnet}.{x}', port=17001, timeout=0.5, data_bytes=4096, hops=1)) for x in range(100, 114)]
                 peer_address = [k for k, v in peer_states.items() if (v and not (k.endswith('.100') or k.endswith('.101')))]
                 print(f"Peers:{peer_address}")
                 
@@ -2374,7 +2392,7 @@ class Aggregator(multiprocessing.Process):
                         self.dict_summary_demand = dict_agg['summary']['demand'] 
                         ### get peer states
                         self.dict_state = dict_agg['states']
-                        [peer_states.update(MULTICAST.send(dict_msg={'states':'all'}, ip=ip, port=17001, timeout=0.1, data_bytes=4096, hops=1)) for ip in peer_address]
+                        [peer_states.update(MULTICAST.send(dict_msg={'states':'all'}, ip=ip, port=17001, timeout=0.2, data_bytes=4096, hops=1)) for ip in peer_address]
                         for address, state in peer_states.items():
                             self.dict_state.update(state)
                             for k, v in state.items():
@@ -2415,7 +2433,7 @@ class Aggregator(multiprocessing.Process):
 
                         
                         ### update meter reading
-                        peer_states.update(MULTICAST.send(dict_msg={'states':'all'}, ip=f'{subnet}.101', port=17001, timeout=0.1, data_bytes=4096, hops=1))
+                        peer_states.update(MULTICAST.send(dict_msg={'states':'all'}, ip=f'{subnet}.101', port=17001, timeout=0.2, data_bytes=4096, hops=1))
                         for address, state in peer_states.items():
                             self.dict_state.update(state)
                             
@@ -2430,7 +2448,7 @@ class Aggregator(multiprocessing.Process):
 
                         ### update state of other devices, e.g., doors, windows
                         if (self.dict_common['unixtime'] % 15 < 1) and (self.house_num==1):
-                            peer_states.update(MULTICAST.send(dict_msg={'states':'all'}, ip='224.0.2.0', port=17000, timeout=0.3, data_bytes=4096, hops=1))
+                            [peer_states.update(MULTICAST.send(dict_msg={'states':'all'}, ip=f'192.168.11.{x}', port=17001, timeout=0.2, data_bytes=4096, hops=1)) for x in range(114, 126)]
                             
                         self.pipe_agg_grainy1.send({'emulated_demand': {'grainy': grainy, 'chroma': chroma}})
                         time.sleep(self.pause)

@@ -373,6 +373,25 @@ def save_data(dict_save, folder, filename, case, sample='1S', summary=False):
         print(df)
         # print(df.describe())
         return dict_save
+        
+
+def save_pickle(dict_data, path='history/data.pkl.xz'):
+    'Save data as pickle file.'
+    try:
+        df_all = pd.DataFrame.from_dict(dict_data, orient='index').reset_index(drop=True).astype(float)
+        try:
+            on_disk = pd.read_pickle(path, compression='infer').reset_index(drop=True)
+            df_all = pd.concat([on_disk, df_all], axis=0, sort=False).reset_index(drop=True)
+            df_all['unixtime'] = df_all['unixtime'].astype(int)
+            df_all = df_all.groupby('unixtime').mean().reset_index(drop=False)
+            df_all.to_pickle(path, compression='infer')
+        except Exception as e:
+            df_all.to_pickle(path, compression='infer')
+        
+        return {}
+    except Exception as e:
+        print("Error METER.save_pickle:", e)
+        return dict_data 
 
 # def save_data(dict_save, folder, filename, case, sample='1S', summary=False):
 #   try:

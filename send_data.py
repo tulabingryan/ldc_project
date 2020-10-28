@@ -99,7 +99,7 @@ def get_local_ip(report=False):
             s.close()
             break
         except Exception as e:
-            print(f"Error get_local_ip:{e}")
+            # print(f"Error get_local_ip:{e}")
             time.sleep(1)
 
     if report: 
@@ -127,7 +127,7 @@ def main():
     last_edit = time.time()
     while True:
         try:
-            # local_ip = get_local_ip()  # ensures network connection
+            get_local_ip()  # ensures network connection
             now = datetime.datetime.now()
             dt = now.timetuple()
             today = now.strftime('%Y_%m_%d')

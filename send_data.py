@@ -90,7 +90,6 @@ def sync_files(dict_paths, remove_source=False, options='-auhe'):
 
 def get_local_ip(report=False):
     # get local ip address
-    local_ip = '127.0.0.1'
     while True:
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -99,7 +98,7 @@ def get_local_ip(report=False):
             s.close()
             break
         except Exception as e:
-            # print(f"Error get_local_ip:{e}")
+            if report: print(f"{datetime.datetime.now().isoformat()} Error get_local_ip:{e}")
             time.sleep(1)
 
     if report: 
@@ -113,11 +112,10 @@ def main():
     dict_paths={
                 '/home/pi/ldc_project/history/': 'pi@192.168.1.81:/home/pi/studies/ardmore/data/',
                 '/home/pi/ldc_project/logs/': 'pi@192.168.1.81:/home/pi/studies/ardmore/logs/',
-                '/home/pi/ldc_project/ldc_homeserver/history/': 'pi@192.168.1.81:/home/pi/studies/ardmore/homeserver/',
                 'pi@192.168.1.81:/home/pi/ldc_project/ldc_gridserver/dict_cmd.txt': '/home/pi/ldc_project/ldc_simulator/dict_cmd.txt',
                 }
 
-    interval = 1
+    interval = 10
 
     if not options.n:
         print(f'sending files quitely every {interval}s...')
@@ -150,12 +148,22 @@ def main():
                         last_edit = os.stat(p).st_mtime
                         compress_pickle(p)
                              
-                sync_files(dict_paths=dict_paths, remove_source=False)
+                sync_files(
+                    dict_paths={'/home/pi/ldc_project/history/': 'pi@192.168.1.81:/home/pi/studies/ardmore/data/'},
+                    remove_source=False)
 
-             
+                sync_files(
+                    dict_paths={'/home/pi/ldc_project/logs/': 'pi@192.168.1.81:/home/pi/studies/ardmore/logs/'}, 
+                    remove_source=False)
+
+                sync_files(
+                    dict_paths={'pi@192.168.1.81:/home/pi/ldc_project/ldc_gridserver/dict_cmd.txt': '/home/pi/ldc_project/ldc_simulator/dict_cmd.txt'},
+                    remove_source=False)
+
             time.sleep(interval)
         except Exception as e:
-            print("Error send_data:", e)
+            # print(f"{datetime.datetime.now().isoformat()} Error send_data: {e}")
+            pass
         except KeyboardInterrupt:
             break
 

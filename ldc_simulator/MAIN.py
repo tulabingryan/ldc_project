@@ -485,6 +485,7 @@ if __name__ == '__main__':
 
 
     else:
+        time.sleep(60)
         dict_config = read_json('/home/pi/ldc_project/config_self.json')
         dict_cmd = read_json('/home/pi/ldc_project/ldc_simulator/dict_cmd.txt')
         algorithm = dict_cmd['algorithm']

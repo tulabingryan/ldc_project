@@ -54,7 +54,7 @@ from PACKAGES import *
 
 
 ######## helper functions #################
-def get_local_ip():
+def get_local_ip(report=False):
     # get local ip address
     while True:
         try:
@@ -64,8 +64,8 @@ def get_local_ip():
             s.close()
             break
         except Exception as e:
-            print("Error in get_local_ip: ", e)
-            time.sleep(3)
+            if report: print(f"{datetime.datetime.now().isoformat()} Error get_local_ip:{e}")
+            time.sleep(1)
         except KeyboardInterrupt:
             break
     return local_ip

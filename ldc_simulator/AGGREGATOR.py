@@ -830,7 +830,7 @@ class Aggregator(multiprocessing.Process):
             dict_house=self.dict_house, 
             idx=self.idx, distribution=self.distribution))
 
-        if (self.simulation==0)&(self.device_ip==111):
+        if (self.simulation==0):
             while True:
                 try:
                     import SENSIBO
@@ -846,17 +846,17 @@ class Aggregator(multiprocessing.Process):
                     print(f"Error AGGREGATOR.heatpump.setup_sensibo:{e}")
 
 
-            while True:
-                try:
-                    import RPi.GPIO as GPIO
-                    GPIO.setmode(GPIO.BOARD)
-                    GPIO.setwarnings(False)
-                    # put in closed status initially
-                    setup_gpio(inputs=[], outputs=[15, 32, 36, 38, 40])
-                    GPIO.output([15, 32, 36, 38, 40], [0, 0, 0, 0, 0])
-                    break
-                except Exception as e:
-                    print("Error AGGREGATOR.heatpump.setup_gpio:", e)
+            # while True:
+            #     try:
+            #         import RPi.GPIO as GPIO
+            #         GPIO.setmode(GPIO.BOARD)
+            #         GPIO.setwarnings(False)
+            #         # put in closed status initially
+            #         setup_gpio(inputs=[], outputs=[15, 32, 36, 38, 40])
+            #         GPIO.output([15, 32, 36, 38, 40], [0, 0, 0, 0, 0])
+            #         break
+            #     except Exception as e:
+            #         print("Error AGGREGATOR.heatpump.setup_gpio:", e)
 
         
         dict_save = {}
@@ -979,14 +979,14 @@ class Aggregator(multiprocessing.Process):
                             if self.dict_heatpump['charging_counter']<=0:
                                 self.dict_heatpump['charging_counter'] = self.dict_heatpump['min_chargingtime']
                                 if self.dict_heatpump['connected'][0]==1 and self.sensibo_state['on']==False:
-                                        self.sensibo_api.pod_change_ac_state(self.uid, self.sensibo_state, "on", True) 
+                                    self.sensibo_api.pod_change_ac_state(self.uid, self.sensibo_state, "on", True) 
                                 elif self.dict_heatpump['connected'][0]==0 and self.sensibo_state['on']==True:
-                                        self.sensibo_api.pod_change_ac_state(self.uid, self.sensibo_state, "on", False)
+                                    self.sensibo_api.pod_change_ac_state(self.uid, self.sensibo_state, "on", False)
                                 ### change mode if needed 
                                 if self.dict_heatpump['mode'][0]==1 and self.sensibo_state['mode']=='cool':
-                                        self.sensibo_api.pod_change_ac_state(self.uid, self.sensibo_state, "mode", "heat")  # change to heating
+                                    self.sensibo_api.pod_change_ac_state(self.uid, self.sensibo_state, "mode", "heat")  # change to heating
                                 elif self.dict_heatpump['mode'][0]==0 and self.sensibo_state['mode']=='heat':
-                                        self.sensibo_api.pod_change_ac_state(self.uid, self.sensibo_state, "mode", "cool")  # change to cooling
+                                    self.sensibo_api.pod_change_ac_state(self.uid, self.sensibo_state, "mode", "cool")  # change to cooling
                                 ### implement targetTemperature adjustment
                                 if (self.sensibo_state['targetTemperature']!=int(self.dict_heatpump['temp_target'][0])):
                                     self.sensibo_api.pod_change_ac_state(self.uid, self.sensibo_state, "targetTemperature", int(self.dict_heatpump['temp_target'][0]))

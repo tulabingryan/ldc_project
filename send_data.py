@@ -62,7 +62,7 @@ def compress_pickle(path):
 #         print("Error compress_pickle:", e)
         
 
-def sync_files(dict_paths, remove_source=False, options='-auhe'):
+def sync_files(dict_paths, remove_source=False, options='-auq'):
     '''
     -v, –verbose                             Verbose output
     -q, –quiet                                  suppress message output

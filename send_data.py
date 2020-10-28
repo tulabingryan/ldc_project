@@ -62,7 +62,7 @@ def compress_pickle(path):
 #         print("Error compress_pickle:", e)
         
 
-def sync_files(dict_paths, remove_source=False, options='-auq'):
+def sync_files(dict_paths, remove_source=False, options='-auhe'):
     '''
     -v, –verbose                             Verbose output
     -q, –quiet                                  suppress message output
@@ -82,7 +82,7 @@ def sync_files(dict_paths, remove_source=False, options='-auq'):
             if remove_source:
                 os.system(f'sshpass -p "ldc" rsync {options} ssh --remove-source-files {from_path} {to_path}') 
             else:
-                os.system(f'sshpass -p "ldc" rsync {options} ssh -T /home/pi --exclude-from ".send_data-exluded" {from_path} {to_path}')
+                os.system(f'sshpass -p "ldc" rsync {options} ssh -T /home/pi --exclude-from ".send_data-exluded" --quiet {from_path} {to_path}')
         except Exception as e:
             print("Error:", e, from_path, to_path)
 
@@ -170,6 +170,6 @@ def main():
 
 
 if __name__ == '__main__':
-    time.sleep(60)  # delay to allow hardware bootup
+    # time.sleep(60)  # delay to allow hardware bootup
     main()
 

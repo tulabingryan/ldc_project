@@ -358,14 +358,14 @@ class Aggregator(multiprocessing.Process):
                         self.pipe_agg_network0.send({'summary_demand':{'p_mw':p_mw}, 'common':self.dict_common})       
                         # self.pipe_agg_network0.send({'summary_demand':{'p_mw':p_mw, 'p_a_mw':p_a_mw, 'p_b_mw': p_b_mw, 'p_c_mw': p_c_mw}, 'common':self.dict_common})
 
-                    # if self.pipe_agg_network0.poll():
-                    grid_data = self.pipe_agg_network0.recv()  # to empty pipe
-                    # factor = (factor*0.99) + (np.mean(grid_data['factor']) * 0.01)
-                    # sn_mva = np.mean(grid_data['sn_mva'])
-                    # pf = np.mean(grid_data['pf'])
-                    # pfe_mw = (0.9*pfe_mw) + (0.1*(np.mean(grid_data['loss_percent']) - (nogrid_percent*factor)))
-                    # actual_loading = np.mean(grid_data['loading_percent'])
-                    self.dict_common['loading_percent'] = grid_data['loading_percent']
+                    if self.pipe_agg_network0.poll():
+                        grid_data = self.pipe_agg_network0.recv()  # to empty pipe
+                        # factor = (factor*0.99) + (np.mean(grid_data['factor']) * 0.01)
+                        # sn_mva = np.mean(grid_data['sn_mva'])
+                        # pf = np.mean(grid_data['pf'])
+                        # pfe_mw = (0.9*pfe_mw) + (0.1*(np.mean(grid_data['loss_percent']) - (nogrid_percent*factor)))
+                        # actual_loading = np.mean(grid_data['loading_percent'])
+                        # self.dict_common['loading_percent'] = grid_data['loading_percent']
                 
                     
                     if self.target=='auto': 

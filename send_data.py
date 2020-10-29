@@ -154,7 +154,7 @@ def main():
 
                 sync_files(
                     dict_paths={'/home/pi/ldc_project/logs/': 'pi@192.168.1.81:/home/pi/studies/ardmore/logs/'}, 
-                    remove_source=False)
+                    remove_source=True)
 
                 sync_files(
                     dict_paths={'pi@192.168.1.81:/home/pi/ldc_project/ldc_gridserver/dict_cmd.txt': '/home/pi/ldc_project/ldc_simulator/dict_cmd.txt'},

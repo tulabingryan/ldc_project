@@ -105,7 +105,7 @@ def get_local_ip(report=False):
         print("Local IP:{}".format(local_ip))
     return local_ip
 
-def main():
+def send_data():
     parser = OptionParser(version=' ')
     parser.add_option('-n', '--n', dest='n', default=0, help='now')
     options, args = parser.parse_args(sys.argv[1:])
@@ -115,7 +115,7 @@ def main():
                 'pi@192.168.1.81:/home/pi/ldc_project/ldc_gridserver/dict_cmd.txt': '/home/pi/ldc_project/ldc_simulator/dict_cmd.txt',
                 }
 
-    interval = 10
+    interval = 1
 
     if not options.n:
         print(f'sending files quitely every {interval}s...')
@@ -125,7 +125,7 @@ def main():
     last_edit = time.time()
     while True:
         try:
-            get_local_ip()  # ensures network connection
+            local_ip = get_local_ip()  # ensures network connection
             now = datetime.datetime.now()
             dt = now.timetuple()
             today = now.strftime('%Y_%m_%d')
@@ -148,17 +148,17 @@ def main():
                         last_edit = os.stat(p).st_mtime
                         compress_pickle(p)
                              
-                sync_files(
-                    dict_paths={'/home/pi/ldc_project/history/': 'pi@192.168.1.81:/home/pi/studies/ardmore/data/'},
-                    remove_source=False)
+                        sync_files(
+                            dict_paths={
+                                '/home/pi/ldc_project/history/': 'pi@192.168.1.81:/home/pi/studies/ardmore/data/',
+                                '/home/pi/ldc_project/logs/': 'pi@192.168.1.81:/home/pi/studies/ardmore/logs/',
+                                },
+                            remove_source=False)
 
-                sync_files(
-                    dict_paths={'/home/pi/ldc_project/logs/': 'pi@192.168.1.81:/home/pi/studies/ardmore/logs/'}, 
-                    remove_source=True)
-
-                sync_files(
-                    dict_paths={'pi@192.168.1.81:/home/pi/ldc_project/ldc_gridserver/dict_cmd.txt': '/home/pi/ldc_project/ldc_simulator/dict_cmd.txt'},
-                    remove_source=False)
+                if int(local_ip.split('.')[-1])<=112: 
+                    sync_files(
+                        dict_paths={'pi@192.168.1.81:/home/pi/ldc_project/ldc_gridserver/dict_cmd.txt': '/home/pi/ldc_project/ldc_simulator/dict_cmd.txt'},
+                        remove_source=False)
 
             time.sleep(interval)
         except Exception as e:
@@ -170,6 +170,5 @@ def main():
 
 
 if __name__ == '__main__':
-    # time.sleep(60)  # delay to allow hardware bootup
-    main()
+    send_data()
 

@@ -2348,6 +2348,13 @@ class Aggregator(multiprocessing.Process):
                     self.compress_pickle(path=f'/home/pi/ldc_project/history/H{self.house_num}_{last_day}.pkl')
                 last_day = self.dict_common['today']
 
+
+                ### update peer address
+                if (self.dict_common['unixtime']%60 < 1):
+                    peer_states = {}
+                    [peer_states.update(MULTICAST.send(dict_msg={'states':'all'}, ip=f'{subnet}.{x}', port=17001, timeout=0.2, data_bytes=4096, hops=1)) for x in range(100, 114)]
+                    peer_address = [k for k, v in peer_states.items() if (v and not (k.endswith('.100') or k.endswith('.101')))]
+                    
                 ### update state of other devices, e.g., doors, windows
                 if (self.dict_common['unixtime'] % 15 < 1) and (self.house_num==1):
                     [peer_states.update(MULTICAST.send(dict_msg={'states':'all'}, ip=f'192.168.11.{x}', port=17001, timeout=0.2, data_bytes=4096, hops=1)) for x in range(114, 126)]

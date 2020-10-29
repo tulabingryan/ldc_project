@@ -1,59 +1,24 @@
 import socket
-import struct
-import sys
+import os
 import time
-import json
-import ast
-import pandas as pd
-import serial
-import multiprocessing
-import threading, queue
 
 
-def send_cmd(dict_msg, ip='224.0.2.0', port=17001, timeout=5, hops=3):
-    # send multicast query to listening devices
-    multicast_group=(ip, port)
-    # Create the datagram socket
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+def get_local_ip(report=False):
+    # get local ip address
+    while True:
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            local_ip = s.getsockname()[0]
+            s.close()
+            break
+        except Exception as e:
+            if report: print(f"{datetime.datetime.now().isoformat()} Error get_local_ip:{e}")
+            time.sleep(1)
 
-    # Set a timeout so the socket does not block
-    # indefinitely when trying to receive data.
-    sock.settimeout(timeout)
-
-    # Set the time-to-live for messages to 1 so they do not
-    # go past the local network segment.
-    ttl = struct.pack('b', hops)  # number of hops
-    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, ttl)
-
-    dict_local = {}
-    x = time.perf_counter()
-
-    try:
-        # Send data to the multicast group 
-        message = str(dict_msg).replace("'", "\"").encode()
-        counter = time.perf_counter()
-        sent = sock.sendto(message, multicast_group)
-
-        # Look for responses from all recipients
-        while True:
-            try:
-                data, server = sock.recvfrom(int(2**16))
-                received_msg = data.decode("utf-8")
-                dict_msg = ast.literal_eval(received_msg)
-                dict_local.update(dict_msg)
-
-            except socket.timeout:
-                break
-            else:
-                pass
-    except Exception as e:
-        print("Error in MULTICAST send:", e)
-        sock.close()
-    finally:
-        sock.close()
-
-    return dict_local
-
+    if report: 
+        print("Local IP:{}".format(local_ip))
+    return local_ip
 
 
 
@@ -61,10 +26,26 @@ def send_cmd(dict_msg, ip='224.0.2.0', port=17001, timeout=5, hops=3):
 if __name__ == '__main__':
     while True:
         try:
+            print("\n---------------------------------------------------------------")
+            print("Send command to peer device via ssh.")
+            local_ip = get_local_ip(report=True)
+            target = input("\nTarget IP: ")
             cmd = input("Command: ")
-            dict_msg = {"cmd":cmd}
-            dict_data = send_cmd(dict_msg=dict_msg)
-            print(dict_data)
+            
+            if target:
+                peers = target.split(',') 
+            else:
+                subnet = '.'.join(local_ip.split('.')[:-1])
+                if subnet.endswith('.11'):
+                    limit = 130
+                else:
+                    limit = 114
+                peers = [f'{subnet}.{x}' for x in range(100, limit)]
+
+            for p in peers:
+                print(f'\n{p}')
+                os.system(f'sshpass -p "ldc" ssh pi@{p} {cmd}')
+
         except Exception as e:
             print("Error main:", e)
         except KeyboardInterrupt:

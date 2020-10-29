@@ -51,9 +51,31 @@ Environment = Weather environment, e.g, outside temperature, humidity, solar, wi
 
 from PACKAGES import * 
 
+import collections
 
 
 ######## helper functions #################
+def update_dict(old_dict, new_dict):
+    '''
+    Update old dictionary using new dictionary.
+    Parameters:
+        old_dict: old dictionary
+        new_dict: new dictionary
+    Returns:
+        old_dict, updated dictionary
+    '''
+    for k, v in new_dict.items():
+        if isinstance(old_dict, collections.Mapping):
+            if isinstance(v, collections.Mapping):
+                r = update(old_dict.get(k, {}), v)
+                old_dict[k] = r
+            else:
+                old_dict[k] = u[k]
+        else:
+            old_dict = {k: u[k]}
+    return old_dict
+
+
 def get_local_ip(report=False):
     # get local ip address
     while True:
@@ -361,6 +383,7 @@ def save_data(dict_save, folder, filename, case, sample='1S', summary=False):
         df = pd.DataFrame.from_dict(dict_save, orient='index')
         df.index = pd.to_datetime(df.index, unit='s').tz_localize('UTC').tz_convert('Pacific/Auckland')
         path = f'/home/pi/studies/results/{folder}/{case}'
+        df.dropna(inplace=True)
         os.makedirs(path, exist_ok=True)  # create folder if none existent
         df.to_hdf(f'{path}/{filename}', 
                     key=f'records', mode='a', append=True, 
@@ -390,7 +413,7 @@ def save_pickle(dict_data, path='history/data.pkl.xz'):
         
         return {}
     except Exception as e:
-        print("Error METER.save_pickle:", e)
+        print("Error save_pickle:", e)
         return dict_data 
 
 # def save_data(dict_save, folder, filename, case, sample='1S', summary=False):

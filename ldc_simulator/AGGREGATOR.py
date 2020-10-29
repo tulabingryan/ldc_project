@@ -97,6 +97,8 @@ class Aggregator(multiprocessing.Process):
         self.pipe_agg_multicast0, self.pipe_agg_multicast1 = multiprocessing.Pipe()
         self.pipe_agg_udp0, self.pipe_agg_udp1 = multiprocessing.Pipe()
         self.pipe_agg_tcp0, self.pipe_agg_tcp1 = multiprocessing.Pipe()
+        
+        # self.q_states = multiprocessing.Queue(maxsize=32)
 
         self.idx = idx
         self.house_num = idx + 1
@@ -317,6 +319,7 @@ class Aggregator(multiprocessing.Process):
                 for p in self.load_pipes:
                     new = p.recv()
                     k = new['load_type'][0]
+
                     self.dict_summary_demand[f'{k}'] = [new['actual_demand'][new['house']==h].sum() for h in self.dict_house['name']]  # sum up loads per house
                     self.dict_summary_status[f'{k}'] = new['actual_status'].tolist()
                     self.dict_summary_mode[f'{k}'] = new['mode'].tolist()
@@ -336,34 +339,34 @@ class Aggregator(multiprocessing.Process):
                     'common': self.dict_common
                         })
 
+                # if self.q_states.full():
+                #     self.q_states.get()
+                # self.q_states.put({int(self.dict_common['unixtime']): self.dict_state})
+
                 [p.send(self.dict_agg) for p in self.ready_agg]
 
 
                 if self.simulation==1:
                     decay = np.exp(-self.dict_common['step_size']/86400)
                     p_mw = np.sum(np.array(list(self.dict_summary_demand.values())), axis=0) * 1e-6
-                    # p_a_mw = np.multiply(p_mw, (self.dict_house['phase']=='AN')*1)
-                    # p_b_mw = np.multiply(p_mw, (self.dict_house['phase']=='BN')*1)
-                    # p_c_mw = np.multiply(p_mw, (self.dict_house['phase']=='CN')*1)
-
                     nogrid_percent = np.sum(p_mw)*100/(sn_mva * pf)
                     loss_percent = np.power(nogrid_percent,2) * factor # factors are derived using regression as compared with pandapower simulation
                     self.dict_common['loading_percent'] = nogrid_percent #(nogrid_percent*(1-decay)) + (decay*self.dict_common['loading_percent'])  #+ loss_percent
 
                     ### send data to network simulator
-                    # self.pipe_agg_network0.send({'summary_demand':{'p_mw':p_mw, 'p_a_mw':p_a_mw, 'p_b_mw': p_b_mw, 'p_c_mw': p_c_mw}, 'common':self.dict_common})
                     if not self.pipe_agg_network1.poll():
                         self.pipe_agg_network0.send({'summary_demand':{'p_mw':p_mw}, 'common':self.dict_common})       
+                        # self.pipe_agg_network0.send({'summary_demand':{'p_mw':p_mw, 'p_a_mw':p_a_mw, 'p_b_mw': p_b_mw, 'p_c_mw': p_c_mw}, 'common':self.dict_common})
+
+                    # if self.pipe_agg_network0.poll():
+                    grid_data = self.pipe_agg_network0.recv()  # to empty pipe
+                    # factor = (factor*0.99) + (np.mean(grid_data['factor']) * 0.01)
+                    # sn_mva = np.mean(grid_data['sn_mva'])
+                    # pf = np.mean(grid_data['pf'])
+                    # pfe_mw = (0.9*pfe_mw) + (0.1*(np.mean(grid_data['loss_percent']) - (nogrid_percent*factor)))
+                    # actual_loading = np.mean(grid_data['loading_percent'])
+                    self.dict_common['loading_percent'] = grid_data['loading_percent']
                 
-                    if self.pipe_agg_network0.poll():
-                        grid_data = self.pipe_agg_network0.recv()  # to empty pipe
-                        # factor = (factor*0.99) + (np.mean(grid_data['factor']) * 0.01)
-                        # sn_mva = np.mean(grid_data['sn_mva'])
-                        # pf = np.mean(grid_data['pf'])
-                        # pfe_mw = (0.9*pfe_mw) + (0.1*(np.mean(grid_data['loss_percent']) - (nogrid_percent*factor)))
-                        # actual_loading = np.mean(grid_data['loading_percent'])
-                        # self.dict_common['loading_percent'] = np.mean(grid_data['loading_percent'])
-                    
                     
                     if self.target=='auto': 
                         w = self.dict_common['step_size'] / 86400
@@ -583,7 +586,9 @@ class Aggregator(multiprocessing.Process):
                     self.dict_common.update(dict_agg['common'])
                     if self.dict_common['is_alive']==False: 
                         raise KeyboardInterrupt
+
                     self.dict_summary_demand.update(dict_agg['summary_demand'])
+                    
                     ### update network load
                     net.asymmetric_load['p_a_mw'] = np.multiply(self.dict_summary_demand['p_mw'], (self.dict_house['phase']=='AN')*1)
                     net.asymmetric_load['p_b_mw'] = np.multiply(self.dict_summary_demand['p_mw'], (self.dict_house['phase']=='BN')*1)
@@ -624,65 +629,64 @@ class Aggregator(multiprocessing.Process):
                  
                     ### collect data for saving
                     if self.save_history:
-                        dict_save_trafo.update({int(self.dict_common['unixtime']):trafo_data})
-                        dict_save_bus.update({int(self.dict_common['unixtime']):bus_data})
-                        dict_save_line.update({int(self.dict_common['unixtime']):line_data})
-                        dict_save_load.update({self.dict_common['unixtime']:load_data})
+                        # dict_save_trafo.update({int(self.dict_common['unixtime']):trafo_data})
+                        # dict_save_bus.update({int(self.dict_common['unixtime']):bus_data})
+                        # dict_save_line.update({int(self.dict_common['unixtime']):line_data})
+                        # dict_save_load.update({self.dict_common['unixtime']:load_data})
 
-                        dict_save_trafo.update({self.dict_common['unixtime']:trafo_data})
-                        
-                        # dict_save_bus.update({self.dict_common['unixtime']:{
-                        #         # 'vm_a_pu': ','.join(np.char.zfill(np.round(bus_data['vm_a_pu'], 6).astype(str), 10)),
-                        #         # 'vm_b_pu': ','.join(np.char.zfill(np.round(bus_data['vm_b_pu'], 6).astype(str), 10)),
-                        #         # 'vm_c_pu': ','.join(np.char.zfill(np.round(bus_data['vm_c_pu'], 6).astype(str), 10)),
-                        #         # 'va_a_degree': ','.join(np.char.zfill(np.round(bus_data['va_a_degree'], 6).astype(str), 10)),
-                        #         # 'va_b_degree': ','.join(np.char.zfill(np.round(bus_data['va_b_degree'], 6).astype(str), 10)),
-                        #         # 'va_c_degree': ','.join(np.char.zfill(np.round(bus_data['va_c_degree'], 6).astype(str), 10)),
-                        #         'unbalance_percent': ','.join(np.char.zfill(np.round(bus_data['unbalance_percent'], 6).astype(str), 10)),
-                        #         }})
+                        dict_save_trafo.update({self.dict_common['unixtime']:trafo_data})                        
+                        dict_save_bus.update({self.dict_common['unixtime']:{
+                                # 'vm_a_pu': ','.join(np.char.zfill(np.round(bus_data['vm_a_pu'], 6).astype(str), 10)),
+                                # 'vm_b_pu': ','.join(np.char.zfill(np.round(bus_data['vm_b_pu'], 6).astype(str), 10)),
+                                # 'vm_c_pu': ','.join(np.char.zfill(np.round(bus_data['vm_c_pu'], 6).astype(str), 10)),
+                                # 'va_a_degree': ','.join(np.char.zfill(np.round(bus_data['va_a_degree'], 6).astype(str), 10)),
+                                # 'va_b_degree': ','.join(np.char.zfill(np.round(bus_data['va_b_degree'], 6).astype(str), 10)),
+                                # 'va_c_degree': ','.join(np.char.zfill(np.round(bus_data['va_c_degree'], 6).astype(str), 10)),
+                                'unbalance_percent': ','.join(np.char.zfill(np.round(bus_data['unbalance_percent'], 6).astype(str), 10)),
+                                }})
 
                         
-                        # dict_save_line.update({self.dict_common['unixtime']:{
-                        #     # 'loading_percentA': ','.join(np.char.zfill(np.round(line_data['loading_percentA'], 6).astype(str), 10)),
-                        #     # 'loading_percentB': ','.join(np.char.zfill(np.round(line_data['loading_percentB'], 6).astype(str), 10)),
-                        #     # 'loading_percentC': ','.join(np.char.zfill(np.round(line_data['loading_percentC'], 6).astype(str), 10)),
-                        #     'loading_percent': ','.join(np.char.zfill(np.round(line_data['loading_percent'], 6).astype(str), 10)),
-                        #     }})
+                        dict_save_line.update({self.dict_common['unixtime']:{
+                            # 'loading_percentA': ','.join(np.char.zfill(np.round(line_data['loading_percentA'], 6).astype(str), 10)),
+                            # 'loading_percentB': ','.join(np.char.zfill(np.round(line_data['loading_percentB'], 6).astype(str), 10)),
+                            # 'loading_percentC': ','.join(np.char.zfill(np.round(line_data['loading_percentC'], 6).astype(str), 10)),
+                            'loading_percent': ','.join(np.char.zfill(np.round(line_data['loading_percent'], 6).astype(str), 10)),
+                            }})
                         
-                        # dict_save_load.update({self.dict_common['unixtime']:{
-                        #     'p_a_mw': ','.join(np.char.zfill(np.round(load_data['p_a_mw'], 6).astype(str), 10)),
-                        #     'p_b_mw': ','.join(np.char.zfill(np.round(load_data['p_b_mw'], 6).astype(str), 10)),
-                        #     'p_c_mw': ','.join(np.char.zfill(np.round(load_data['p_c_mw'], 6).astype(str), 10)),
-                        #     'q_a_mvar': ','.join(np.char.zfill(np.round(load_data['q_a_mvar'], 6).astype(str), 10)),
-                        #     'q_b_mvar': ','.join(np.char.zfill(np.round(load_data['q_b_mvar'], 6).astype(str), 10)),
-                        #     'q_c_mvar': ','.join(np.char.zfill(np.round(load_data['q_c_mvar'], 6).astype(str), 10)),
-                        #     }})
+                        dict_save_load.update({self.dict_common['unixtime']:{
+                            'p_a_mw': ','.join(np.char.zfill(np.round(load_data['p_a_mw'], 6).astype(str), 10)),
+                            'p_b_mw': ','.join(np.char.zfill(np.round(load_data['p_b_mw'], 6).astype(str), 10)),
+                            'p_c_mw': ','.join(np.char.zfill(np.round(load_data['p_c_mw'], 6).astype(str), 10)),
+                            'q_a_mvar': ','.join(np.char.zfill(np.round(load_data['q_a_mvar'], 6).astype(str), 10)),
+                            'q_b_mvar': ','.join(np.char.zfill(np.round(load_data['q_b_mvar'], 6).astype(str), 10)),
+                            'q_c_mvar': ','.join(np.char.zfill(np.round(load_data['q_c_mvar'], 6).astype(str), 10)),
+                            }})
 
                         if (len(dict_save_trafo.keys())>=self.save_interval) and (self.case!=None):
-                            dict_save_trafo = save_pickle(dict_save_trafo, path=f'/home/pi/studies/results/{casefolder}/{case}/trafo.pkl')
-                            dict_save_bus = save_pickle(dict_save_bus, path=f'/home/pi/studies/results/{casefolder}/{case}/bus.pkl')
-                            dict_save_line = save_pickle(dict_save_line, path=f'/home/pi/studies/results/{casefolder}/{case}/line.pkl')
-                            dict_save_load = save_pickle(dict_save_load, path=f'/home/pi/studies/results/{casefolder}/{case}/load.pkl')
+                            # dict_save_trafo = save_pickle(dict_save_trafo, path=f'/home/pi/studies/results/{self.casefolder}/{self.case}/trafo.pkl')
+                            # dict_save_bus = save_pickle(dict_save_bus, path=f'/home/pi/studies/results/{self.casefolder}/{self.case}/bus.pkl')
+                            # dict_save_line = save_pickle(dict_save_line, path=f'/home/pi/studies/results/{self.casefolder}/{self.case}/line.pkl')
+                            # dict_save_load = save_pickle(dict_save_load, path=f'/home/pi/studies/results/{self.casefolder}/{self.case}/load.pkl')
 
-                            # dict_save_trafo = save_data(dict_save_trafo, case=self.case,  folder=self.casefolder, filename=f'trafo.h5')
-                            # dict_save_bus = save_data(dict_save_bus, case=self.case,  folder=self.casefolder, filename=f'bus.h5')
-                            # dict_save_line = save_data(dict_save_line, case=self.case,  folder=self.casefolder, filename=f'line.h5')
-                            # dict_save_load = save_data(dict_save_load, case=self.case,  folder=self.casefolder, filename=f'load.h5')
+                            dict_save_trafo = save_data(dict_save_trafo, case=self.case,  folder=self.casefolder, filename=f'trafo.h5')
+                            dict_save_bus = save_data(dict_save_bus, case=self.case,  folder=self.casefolder, filename=f'bus.h5')
+                            dict_save_line = save_data(dict_save_line, case=self.case,  folder=self.casefolder, filename=f'line.h5')
+                            dict_save_load = save_data(dict_save_load, case=self.case,  folder=self.casefolder, filename=f'load.h5')
                         
                     time.sleep(self.pause)
                 except Exception as e:
                     print("Error AGGREGATOR.network:{}".format(e))
                 except KeyboardInterrupt:
                     if self.simulation==1 and self.save_history:
-                        dict_save_trafo = save_pickle(dict_save_trafo, path=f'/home/pi/studies/results/{casefolder}/{case}/trafo.pkl.xz')
-                        dict_save_bus = save_pickle(dict_save_bus, path=f'/home/pi/studies/results/{casefolder}/{case}/bus.pkl.xz')
-                        dict_save_line = save_pickle(dict_save_line, path=f'/home/pi/studies/results/{casefolder}/{case}/line.pkl.xz')
-                        dict_save_load = save_pickle(dict_save_load, path=f'/home/pi/studies/results/{casefolder}/{case}/load.pkl.xz')
+                        # dict_save_trafo = save_pickle(dict_save_trafo, path=f'/home/pi/studies/results/{self.casefolder}/{self.case}/trafo.pkl.xz')
+                        # dict_save_bus = save_pickle(dict_save_bus, path=f'/home/pi/studies/results/{self.casefolder}/{self.case}/bus.pkl.xz')
+                        # dict_save_line = save_pickle(dict_save_line, path=f'/home/pi/studies/results/{self.casefolder}/{self.case}/line.pkl.xz')
+                        # dict_save_load = save_pickle(dict_save_load, path=f'/home/pi/studies/results/{self.casefolder}/{self.case}/load.pkl.xz')
 
-                        # dict_save_trafo = save_data(dict_save_trafo, case=self.case,  folder=self.casefolder, filename=f'trafo.h5')
-                        # dict_save_bus = save_data(dict_save_bus, case=self.case,  folder=self.casefolder, filename=f'bus.h5')
-                        # dict_save_line = save_data(dict_save_line, case=self.case,  folder=self.casefolder, filename=f'line.h5')
-                        # dict_save_load = save_data(dict_save_load, case=self.case,  folder=self.casefolder, filename=f'load.h5')
+                        dict_save_trafo = save_data(dict_save_trafo, case=self.case,  folder=self.casefolder, filename=f'trafo.h5')
+                        dict_save_bus = save_data(dict_save_bus, case=self.case,  folder=self.casefolder, filename=f'bus.h5')
+                        dict_save_line = save_data(dict_save_line, case=self.case,  folder=self.casefolder, filename=f'line.h5')
+                        dict_save_load = save_data(dict_save_load, case=self.case,  folder=self.casefolder, filename=f'load.h5')
                         
                     print(f'Terminating grid simulator...')
                     self.pipe_agg_network1.close()
@@ -780,26 +784,22 @@ class Aggregator(multiprocessing.Process):
         dict_save = {}
         while True:
             try:
-                old_common = self.dict_common.copy()
                 self.dict_common.update(self.pipe_agg_baseload1.recv())
-                self.dict_common['step_size'] = self.dict_common['unixtime'] - old_common['unixtime']
+
                 if self.dict_common['is_alive']==False:
                     raise KeyboardInterrupt
+            
                 ### update baseload
-                # sk = np.add(self.dict_baseload['schedule_skew'], self.dict_common['unixtime'])
-                # self.dict_baseload['actual_demand'] = np.array([df.loc[x, y] for x, y in zip(sk.astype(int), self.dict_baseload['profile'])])
-                if self.case.startswith('ramp') or self.case.startswith('ideal'):
-                    self.dict_baseload['actual_demand'] = np.ones(self.dict_devices['house']['n_units']) * 10  # set each house baseload to constant
-                else:
-                    sk = np.mod(np.add(np.divide(self.dict_baseload['schedule_skew'], 60), self.dict_common['weekminute']), 10080)  # 10080 minutes in a week
-                    self.dict_baseload['actual_demand'] = np.array([df.loc[x, y] for x, y in zip(sk.astype(int), self.dict_baseload['schedule'])]) + np.abs(np.random.normal(0,10,n_units))
+                sk = np.mod(np.add(np.divide(self.dict_baseload['schedule_skew'], 60), self.dict_common['weekminute']), 10080)  # 10080 minutes in a week
+                self.dict_baseload['actual_demand'] = np.array([df.loc[x, y] for x, y in zip(sk.astype(int), self.dict_baseload['schedule'])]) + np.abs(np.random.normal(0,10,n_units))
+            
                 ### send update to main
                 self.pipe_agg_baseload1.send(self.dict_baseload)
+                
                 ### fetch next batch of data
-                # if (self.dict_common['unixtime']>=validity['end']):
-                #   df, validity = fetch_baseload(int(self.dict_common['unixtime']), n_seconds=3600)
                 if (self.dict_common['season']!=validity['season']):
                     df, validity = fetch_baseload(self.dict_common['season'])
+
                 ### save data
                 if self.simulation==1 and self.save_history:
                     if self.summary:
@@ -869,9 +869,7 @@ class Aggregator(multiprocessing.Process):
         while True:
             try:
                 ### update environment models, e.g., air change, water usage, mass_flow, connected, etc.
-                old_common = self.dict_common.copy()
                 self.dict_common.update(self.pipe_agg_heatpump1.recv())
-                self.dict_common['step_size'] = self.dict_common['unixtime'] - old_common['unixtime']
                 if self.dict_common['is_alive']==False: 
                     raise KeyboardInterrupt
 
@@ -894,38 +892,42 @@ class Aggregator(multiprocessing.Process):
                     unixstart=self.dict_heatpump['unixstart'],
                     unixend=self.dict_heatpump['unixend'],
                     schedule_skew=self.dict_heatpump['schedule_skew']))
+                
                 ### update if connected
                 self.dict_heatpump.update(is_connected(unixtime=self.dict_common['unixtime'],
                     unixstart=self.dict_heatpump['unixstart'],
                     unixend=self.dict_heatpump['unixend']))      
-                ### force all ldc-enabled devices to be connected
-                # self.dict_heatpump['connected'] = ((self.dict_heatpump['connected']==1)|(self.dict_heatpump['with_dr']==True))*1
+                
                 ### update device proposed mode, status, priority, and demand
-                self.dict_heatpump.update(device_heatpump(mode=self.dict_heatpump['mode'], 
-                    temp_in=self.dict_heatpump['temp_in'], 
-                    temp_min=self.dict_heatpump['temp_min'], 
-                    temp_max=self.dict_heatpump['temp_max'],
-                    temp_out=self.dict_common['temp_out'], 
-                    temp_target=self.dict_heatpump['temp_target'],
-                    cooling_setpoint=self.dict_heatpump['cooling_setpoint'], 
-                    heating_setpoint=self.dict_heatpump['heating_setpoint'],
-                    tolerance=self.dict_heatpump['tolerance'], 
-                    cooling_power=self.dict_heatpump['cooling_power'], 
-                    heating_power=self.dict_heatpump['heating_power'],
-                    cop=self.dict_heatpump['cop'],
-                    standby_power=self.dict_heatpump['standby_power'],
-                    ventilation_power=self.dict_heatpump['ventilation_power'],
-                    proposed_status=self.dict_heatpump['proposed_status'],
-                    actual_status=self.dict_heatpump['actual_status'],
-                    tcl_control=self.dict_common['tcl_control'])
+                self.dict_heatpump.update(
+                    device_heatpump(mode=self.dict_heatpump['mode'], 
+                        temp_in=self.dict_heatpump['temp_in'], 
+                        temp_min=self.dict_heatpump['temp_min'], 
+                        temp_max=self.dict_heatpump['temp_max'],
+                        temp_out=self.dict_common['temp_out'], 
+                        temp_target=self.dict_heatpump['temp_target'],
+                        cooling_setpoint=self.dict_heatpump['cooling_setpoint'], 
+                        heating_setpoint=self.dict_heatpump['heating_setpoint'],
+                        tolerance=self.dict_heatpump['tolerance'], 
+                        cooling_power=self.dict_heatpump['cooling_power'], 
+                        heating_power=self.dict_heatpump['heating_power'],
+                        cop=self.dict_heatpump['cop'],
+                        standby_power=self.dict_heatpump['standby_power'],
+                        ventilation_power=self.dict_heatpump['ventilation_power'],
+                        proposed_status=self.dict_heatpump['proposed_status'],
+                        actual_status=self.dict_heatpump['actual_status'],
+                        tcl_control=self.dict_common['tcl_control']
+                    )
                 )
                 
                 ### update ldc_dongle approval for the proposed status and demand
                 self.dict_heatpump.update(ldc_dongle(self.dict_heatpump, self.dict_common))
+                
                 ### update environment
                 self.dict_heatpump['temp_out'] = np.add(np.random.normal(0, 0.01, n_units), self.dict_common['temp_out'])
                 self.dict_heatpump['humidity'] = np.add(np.random.normal(0, 0.01, n_units), self.dict_common['humidity'])
                 self.dict_heatpump['windspeed'] = np.add(np.random.normal(0, 0.01, n_units), self.dict_common['windspeed'])
+                
                 ### update solar heat
                 self.dict_heatpump.update(get_solar(unixtime=self.dict_common['unixtime'], 
                     isotime=self.dict_common['isotime'], 
@@ -940,10 +942,12 @@ class Aggregator(multiprocessing.Process):
                     wall_area=self.dict_heatpump['wall_area'], 
                     window_area=self.dict_heatpump['window_area'], 
                     skylight_area=self.dict_heatpump['skylight_area']))
+                
                 ### update heat from all sources
                 self.dict_heatpump.update(sum_heat_sources(solar_heat=self.dict_heatpump['solar_heat'], 
                     heating_power_thermal=self.dict_heatpump['heating_power_thermal'], 
                     cooling_power_thermal=self.dict_heatpump['cooling_power_thermal']))
+                
                 ### update device states, e.g., temp_in, temp_mat, through simulation
                 self.dict_heatpump.update(
                     enduse_tcl(
@@ -1006,21 +1010,20 @@ class Aggregator(multiprocessing.Process):
                     ### additional data
                     # self.dict_heatpump['mode'] = np.array([dict_a_mode[self.sensibo_state['mode']]])
                     # self.dict_heatpump['temp_target'] = np.array([self.sensibo_state['targetTemperature']])
-                    
-                    
-                else:
 
-                    ### save data
-                    if self.save_history:
-                        if self.summary:
-                            dict_save.update(prepare_summary(states=self.dict_heatpump, common=self.dict_common))
-                        else:  
-                            dict_save.update(prepare_data(states=self.dict_heatpump, common=self.dict_common))
-                        if (len(dict_save.keys())>=self.save_interval) and (self.case!=None):
-                            dict_save = save_data(dict_save, case=self.case,  folder=self.casefolder, filename='heatpump.h5', summary=self.summary)
-
+                
                 ### send data to main
-                self.pipe_agg_heatpump1.send(self.dict_heatpump)
+                self.pipe_agg_heatpump1.send(self.dict_heatpump)                    
+                    
+                ### save data
+                if self.simulation and self.save_history:
+                    if self.summary:
+                        dict_save.update(prepare_summary(states=self.dict_heatpump, common=self.dict_common))
+                    else:  
+                        dict_save.update(prepare_data(states=self.dict_heatpump, common=self.dict_common))
+                    if (len(dict_save.keys())>=self.save_interval) and (self.case!=None):
+                        dict_save = save_data(dict_save, case=self.case,  folder=self.casefolder, filename='heatpump.h5', summary=self.summary)
+            
                 time.sleep(self.pause)  # to give way to other threads
             except Exception as e:
                 print(f'Error AGGREGATOR.heatpump:{e}')
@@ -1061,10 +1064,7 @@ class Aggregator(multiprocessing.Process):
 
         while True:
             try:
-                old_common = self.dict_common.copy()
                 self.dict_common.update(self.pipe_agg_heater1.recv())
-                self.dict_common['step_size'] = self.dict_common['unixtime'] - old_common['unixtime']
-                
                 if self.dict_common['is_alive']==False:
                     raise KeyboardInterrupt
 
@@ -1089,14 +1089,14 @@ class Aggregator(multiprocessing.Process):
                         unixend=self.dict_heater['unixend'],
                         schedule_skew=self.dict_heater['schedule_skew'])
                     )
+                
                 ## update if connected
                 self.dict_heater.update(
                     is_connected(unixtime=self.dict_common['unixtime'],
                         unixstart=self.dict_heater['unixstart'],
                         unixend=self.dict_heater['unixend'])
                     )
-                ### force all ldc-enabled devices to be connected
-                # self.dict_heater['connected'] = ((self.dict_heater['connected']==1)|(self.dict_heater['with_dr']==True))*1
+                
                 ### update device proposed mode, status, priority, and demand
                 self.dict_heater.update(
                     device_heating_resistance(mode=self.dict_heater['mode'],
@@ -1113,17 +1113,10 @@ class Aggregator(multiprocessing.Process):
                         actual_status=self.dict_heater['actual_status'],
                         tcl_control=self.dict_common['tcl_control'])
                     )
-                # ### update ldc_signal
-                # self.dict_heater.update(read_signal(ldc_signal=self.dict_heater['ldc_signal'], 
-                #   new_signal=self.dict_common['ldc_signal'], 
-                #   resolution=self.resolution,
-                #   n_units=n_units),
-                #   delay=self.delay, 
-                #   step_size=self.dict_common['step_size'],
-                #   simulation=self.simulation
-                #   )
+                
                 ### update ldc_dongle approval for the proposed status and demand
                 self.dict_heater.update(ldc_dongle(self.dict_heater, self.dict_common))
+                
                 ### update weather
                 self.dict_heater['temp_out'] = np.add(np.random.normal(0, 0.01, n_units), self.dict_common['temp_out'])
                 self.dict_heater['humidity'] = np.add(np.random.normal(0, 0.01, n_units), self.dict_common['humidity'])
@@ -1163,26 +1156,24 @@ class Aggregator(multiprocessing.Process):
                         )
                     )
 
-
+                
                 ### temporary calculation for indoor humidity
                 self.dict_heater['humidity_in'] = np.random.normal(1, 0.001, len(self.dict_heater['temp_in'])) * self.dict_common['humidity'] 
-                
-                if self.simulation==0:
-                    ### read actual sensor readings 
-                    pass
-                else:
-                    ### save data
-                    if self.save_history:
-                        if self.summary:
-                            dict_save.update(prepare_summary(states=self.dict_heater, common=self.dict_common))
-                        else:
-                            dict_save.update(prepare_data(states=self.dict_heater, common=self.dict_common))
-                        if (len(dict_save.keys())>=self.save_interval) and (self.case!=None):
-                            dict_save = save_data(dict_save, case=self.case,  folder=self.casefolder, filename='heater.h5', summary=self.summary)
-                    
+
                 ### send data to main  
                 self.pipe_agg_heater1.send(self.dict_heater)
-                time.sleep(self.pause)  # to give way to other threads
+
+                ### save data
+                if self.simulation and self.save_history:
+                    if self.summary:
+                        dict_save.update(prepare_summary(states=self.dict_heater, common=self.dict_common))
+                    else:
+                        dict_save.update(prepare_data(states=self.dict_heater, common=self.dict_common))
+                    if (len(dict_save.keys())>=self.save_interval) and (self.case!=None):
+                        dict_save = save_data(dict_save, case=self.case,  folder=self.casefolder, filename='heater.h5', summary=self.summary)
+                
+                # to give way to other threads
+                time.sleep(self.pause)  
             except Exception as e:
                 print(f'Error heater:{e}')
             except KeyboardInterrupt:
@@ -1225,15 +1216,13 @@ class Aggregator(multiprocessing.Process):
         dict_save = {}
         while True:
             try:
-                old_common = self.dict_common.copy()
                 self.dict_common.update(self.pipe_agg_waterheater1.recv())
-                self.dict_common['step_size'] = self.dict_common['unixtime'] - old_common['unixtime']
-                
                 if self.dict_common['is_alive']==False: 
                     raise KeyboardInterrupt
 
                 ### update weather
                 self.dict_waterheater['temp_out'] = np.add(np.random.normal(0,0.01,n_units), self.dict_common['temp_out'])
+                
                 ### update valve status
                 self.dict_valve.update(update_device(n_device=1, 
                     device_type='valve', 
@@ -1246,6 +1235,7 @@ class Aggregator(multiprocessing.Process):
                 self.dict_waterheater['mass_flow'] = np.multiply(self.dict_valve['valve0']['actual_status'], 
                         np.clip(np.random.normal(999.1*0.001*0.1, 0.01, n_units), a_min=0.01, a_max=0.25))  # assumed 0.1 L/s
                 # self.dict_waterheater['mass_flow'] = np.add(self.dict_waterheater['mass_flow'], np.random.choice([0, 0.01], n_units, p=[0.9, 0.1]))
+                
                 ### update device proposed mode, status, priority, and demand
                 self.dict_waterheater.update(
                     device_heating_resistance(mode=self.dict_waterheater['mode'],
@@ -1262,14 +1252,6 @@ class Aggregator(multiprocessing.Process):
                         actual_status=self.dict_waterheater['actual_status'],
                         tcl_control=self.dict_common['tcl_control'])
                     )
-                # ### update ldc_signal
-                # self.dict_waterheater.update(read_signal(ldc_signal=self.dict_waterheater['ldc_signal'], 
-                #   new_signal=self.dict_common['ldc_signal'], 
-                #   resolution=self.resolution,
-                #   n_units=n_units,
-                #   delay=self.delay, 
-                #   step_size=self.dict_common['step_size'],
-                #   simulation=self.simulation))
 
                 ### update ldc_dongle approval for the proposed status and demand
                 self.dict_waterheater.update(ldc_dongle(self.dict_waterheater, self.dict_common))
@@ -1291,41 +1273,35 @@ class Aggregator(multiprocessing.Process):
                     )
 
 
-                ### send data to main
-                self.pipe_agg_waterheater1.send(self.dict_waterheater)
-
-                    
+                ### get actual readings
                 if self.simulation==0:
-                    ### get actual readings  
                     response = MULTICAST.send(dict_msg={"pcsensor":"temp_in"}, ip=ip, port=port, timeout=timeout, hops=1)
                     if response:
-                        self.dict_waterheater['temp_in'][0] = response[ip]
-                    
-                    time.sleep(1)
-
+                        self.dict_waterheater['temp_in'][0] = response[ip]                                            
                     ### execute status
                     execute_state(int(self.dict_waterheater['actual_status'][0]), device_id=self.device_ip, report=True)
-                else:
-                    ### save data
-                    if self.save_history:
-                        ### for waterheaters, both summary and individual states are recorded to check the legal compliance
-                        if self.summary:
-                            dict_save.update(prepare_summary(states=self.dict_waterheater, common=self.dict_common))
-                        else:
-                            dict_save.update(prepare_data(states=self.dict_waterheater, common=self.dict_common))
+                    time.sleep(1)
 
-                        if (len(dict_save.keys())>=self.save_interval) and (self.case!=None):
-                            dict_save = save_data(dict_save, case=self.case,  folder=self.casefolder, filename='waterheater.h5', summary=self.summary)
+                ### send data to main
+                self.pipe_agg_waterheater1.send(self.dict_waterheater)
+                                        
+                ### save data
+                if self.simulation and self.save_history:
+                    ### for waterheaters, both summary and individual states are recorded to check the legal compliance
+                    if self.summary:
+                        dict_save.update(prepare_summary(states=self.dict_waterheater, common=self.dict_common))
+                    else:
+                        dict_save.update(prepare_data(states=self.dict_waterheater, common=self.dict_common))
 
-                            
-                        
+                    if (len(dict_save.keys())>=self.save_interval) and (self.case!=None):
+                        dict_save = save_data(dict_save, case=self.case,  folder=self.casefolder, filename='waterheater.h5', summary=self.summary)
+
                 time.sleep(self.pause) # to give way to other threads
             except Exception as e:
                 print(f'Error AGGREGATOR.waterheater:{e}')
             except KeyboardInterrupt:
                 if self.simulation==1 and self.save_history: 
                     save_data(dict_save, case=self.case,  folder=self.casefolder, filename='waterheater.h5', summary=self.summary)
-                    
 
                 print('Terminating waterheater...')
                 self.pipe_agg_waterheater1.close()
@@ -1343,10 +1319,7 @@ class Aggregator(multiprocessing.Process):
 
         while True:
             try:
-                old_common = self.dict_common.copy()
                 self.dict_common.update(self.pipe_agg_fridge1.recv())
-                self.dict_common['step_size'] = self.dict_common['unixtime'] - old_common['unixtime']
-
                 if self.dict_common['is_alive']==False:
                     raise KeyboardInterrupt
 
@@ -1366,14 +1339,7 @@ class Aggregator(multiprocessing.Process):
                         actual_status=self.dict_fridge['actual_status'],
                         tcl_control=self.dict_common['tcl_control'])
                     )
-                # ### update ldc_signal
-                # self.dict_fridge.update(read_signal(ldc_signal=self.dict_fridge['ldc_signal'], 
-                #   new_signal=self.dict_common['ldc_signal'], 
-                #   resolution=self.resolution,
-                #   n_units=self.dict_devices['fridge']['n_units'],
-                #   delay=self.delay, 
-                #   step_size=self.dict_common['step_size'],
-                #   simulation=self.simulation))
+
                 ### update ldc_dongle approval for the proposed status and demand
                 self.dict_fridge.update(ldc_dongle(self.dict_fridge, self.dict_common))
                 
@@ -1394,21 +1360,19 @@ class Aggregator(multiprocessing.Process):
                         )
                     )
 
-                if self.simulation==0:
-                    ### read actual sensors in the device
-                    pass
-                else:
-                    ### save data
-                    if self.save_history:
-                        if self.summary:
-                            dict_save.update(prepare_summary(states=self.dict_fridge, common=self.dict_common))
-                        else:
-                            dict_save.update(prepare_data(states=self.dict_fridge, common=self.dict_common))
-                        if (len(dict_save.keys())>=self.save_interval) and (self.case!=None):
-                                dict_save = save_data(dict_save, case=self.case,  folder=self.casefolder, filename='fridge.h5', summary=self.summary)
-                
+
                 ### send data to main
                 self.pipe_agg_fridge1.send(self.dict_fridge)
+                
+                ### save data
+                if self.simulation and self.save_history:
+                    if self.summary:
+                        dict_save.update(prepare_summary(states=self.dict_fridge, common=self.dict_common))
+                    else:
+                        dict_save.update(prepare_data(states=self.dict_fridge, common=self.dict_common))
+                    if (len(dict_save.keys())>=self.save_interval) and (self.case!=None):
+                            dict_save = save_data(dict_save, case=self.case,  folder=self.casefolder, filename='fridge.h5', summary=self.summary)
+            
                 time.sleep(self.pause)  # to give way to other threads
             except Exception as e:
                 print(f'Error AGGREGATOR.fridge:{e}')
@@ -1431,14 +1395,10 @@ class Aggregator(multiprocessing.Process):
         
         while True:
             try:
-                old_common = self.dict_common.copy()
                 self.dict_common.update(self.pipe_agg_freezer1.recv())
-                self.dict_common['step_size'] = self.dict_common['unixtime'] - old_common['unixtime']
-                
                 if self.dict_common['is_alive']==False:
                     raise KeyboardInterrupt
 
-                ### update data
                 ### update device proposed mode, status, priority, and demand
                 self.dict_freezer.update(
                     device_cooling_compression(mode=self.dict_freezer['mode'],
@@ -1455,14 +1415,7 @@ class Aggregator(multiprocessing.Process):
                         actual_status=self.dict_freezer['actual_status'],
                         tcl_control=self.dict_common['tcl_control'])
                     )
-                # ### update ldc_signal
-                # self.dict_freezer.update(read_signal(ldc_signal=self.dict_freezer['ldc_signal'], 
-                #   new_signal=self.dict_common['ldc_signal'], 
-                #   resolution=self.resolution,
-                #   n_units=self.dict_devices['freezer']['n_units'],
-                #   delay=self.delay, 
-                #   step_size=self.dict_common['step_size'],
-                #   simulation=self.simulation))
+
                 ### update ldc_dongle approval for the proposed status and demand
                 self.dict_freezer.update(ldc_dongle(self.dict_freezer, self.dict_common))
                 
@@ -1483,22 +1436,19 @@ class Aggregator(multiprocessing.Process):
                         )
                     )
 
-                if self.simulation==0:
-                    ### read actual sensors
-                    pass
-                else:
-                    ### save data
-                    if self.save_history:
-                        if self.summary:
-                            dict_save.update(prepare_summary(states=self.dict_freezer, common=self.dict_common))
-                        else:
-                            dict_save.update(prepare_data(states=self.dict_freezer, common=self.dict_common))
-
-                        if (len(dict_save.keys())>=self.save_interval) and (self.case!=None):
-                            dict_save = save_data(dict_save, case=self.case, folder=self.casefolder, filename='freezer.h5', summary=self.summary)
-                    
                 ### send data to main
                 self.pipe_agg_freezer1.send(self.dict_freezer)  
+                
+                ### save data
+                if self.simulation and self.save_history:
+                    if self.summary:
+                        dict_save.update(prepare_summary(states=self.dict_freezer, common=self.dict_common))
+                    else:
+                        dict_save.update(prepare_data(states=self.dict_freezer, common=self.dict_common))
+
+                    if (len(dict_save.keys())>=self.save_interval) and (self.case!=None):
+                        dict_save = save_data(dict_save, case=self.case, folder=self.casefolder, filename='freezer.h5', summary=self.summary)
+                    
                 time.sleep(self.pause)  # to give way to other threads
             except Exception as e:
                 print(f'Error freezer:{e}')
@@ -1530,10 +1480,7 @@ class Aggregator(multiprocessing.Process):
         ### run profiles
         while True:
             try:
-                old_common = self.dict_common.copy()
                 self.dict_common.update(self.pipe_agg_clotheswasher1.recv())
-                self.dict_common['step_size'] = self.dict_common['unixtime'] - old_common['unixtime']
-                
                 if self.dict_common['is_alive']==False:
                     raise KeyboardInterrupt
 
@@ -1546,12 +1493,14 @@ class Aggregator(multiprocessing.Process):
                         unixend=self.dict_clotheswasher['unixend'],
                         schedule_skew=self.dict_clotheswasher['schedule_skew'])
                     )
+
                 ## update if connected
                 self.dict_clotheswasher.update(
                     is_connected(unixtime=self.dict_common['unixtime'],
                         unixstart=self.dict_clotheswasher['unixstart'],
                         unixend=self.dict_clotheswasher['unixend'])
                     )
+
                 ### update device proposed mode, status, priority, and demand
                 self.dict_clotheswasher.update(
                     device_ntcl(len_profile=self.dict_clotheswasher['len_profile'],
@@ -1565,14 +1514,7 @@ class Aggregator(multiprocessing.Process):
                         proposed_demand=np.array([dict_data[k][int((x*y)%x)] for k, x, y in zip(self.dict_clotheswasher['profile'], self.dict_clotheswasher['len_profile'], self.dict_clotheswasher['progress'])]).flatten()
                         )
                     )
-                # ### update ldc_signal
-                # self.dict_clotheswasher.update(read_signal(ldc_signal=self.dict_clotheswasher['ldc_signal'], 
-                #   new_signal=self.dict_common['ldc_signal'], 
-                #   resolution=self.resolution,
-                #   n_units=self.dict_devices['clotheswasher']['n_units'],
-                #   delay=self.delay, 
-                #   step_size=self.dict_common['step_size'],
-                #   simulation=self.simulation))
+
                 ### update ldc_dongle approval for the proposed status and demand
                 self.dict_clotheswasher.update(ldc_dongle(self.dict_clotheswasher, self.dict_common))
                 
@@ -1585,22 +1527,21 @@ class Aggregator(multiprocessing.Process):
                         unixtime=self.dict_common['unixtime'],
                         connected=self.dict_clotheswasher['connected'])
                     )
-                if self.simulation==0:
-                    ### read actual sensors
-                    pass
-                else:
-                    ### save data
-                    if self.save_history:
-                        if self.summary:
-                            dict_save.update(prepare_summary(states=self.dict_clotheswasher, common=self.dict_common))
-                        else:
-                            dict_save.update(prepare_data(states=self.dict_clotheswasher, common=self.dict_common))
 
-                        if (len(dict_save.keys())>=self.save_interval) and (self.case!=None):
-                            dict_save = save_data(dict_save, case=self.case,  folder=self.casefolder, filename='clotheswasher.h5', summary=self.summary)
-                    
+                
                 ### send data to main
-                self.pipe_agg_clotheswasher1.send(self.dict_clotheswasher)  
+                self.pipe_agg_clotheswasher1.send(self.dict_clotheswasher)
+                
+                ### save data
+                if self.simulation and self.save_history:
+                    if self.summary:
+                        dict_save.update(prepare_summary(states=self.dict_clotheswasher, common=self.dict_common))
+                    else:
+                        dict_save.update(prepare_data(states=self.dict_clotheswasher, common=self.dict_common))
+
+                    if (len(dict_save.keys())>=self.save_interval) and (self.case!=None):
+                        dict_save = save_data(dict_save, case=self.case,  folder=self.casefolder, filename='clotheswasher.h5', summary=self.summary)
+                
                 time.sleep(self.pause)
             except Exception as e:
                 print(f'Error clotheswasher run:{e}')
@@ -1642,10 +1583,7 @@ class Aggregator(multiprocessing.Process):
         while True:
             try:
                 ### update environment models, e.g., air change, water usage, mass_flow, connected, etc.
-                old_common = self.dict_common.copy()
                 self.dict_common.update(self.pipe_agg_clothesdryer1.recv())
-                self.dict_common['step_size'] = self.dict_common['unixtime'] - old_common['unixtime']
-                
                 if self.dict_common['is_alive']==False:
                     raise KeyboardInterrupt 
 
@@ -1658,12 +1596,14 @@ class Aggregator(multiprocessing.Process):
                         unixend=self.dict_clothesdryer['unixend'],
                         schedule_skew=self.dict_clothesdryer['schedule_skew'])
                     )
+
                 ### update if connected
                 self.dict_clothesdryer.update(
                     is_connected(unixtime=self.dict_common['unixtime'],
                         unixstart=self.dict_clothesdryer['unixstart'],
                         unixend=self.dict_clothesdryer['unixend'])
                     )
+
                 ### update device proposed mode, status, priority, and demand
                 self.dict_clothesdryer.update(
                     device_ntcl(len_profile=self.dict_clothesdryer['len_profile'],
@@ -1676,14 +1616,7 @@ class Aggregator(multiprocessing.Process):
                         proposed_demand=np.array([dict_data[k][int((x*y)%x)] for k, x, y in zip(self.dict_clothesdryer['profile'], self.dict_clothesdryer['len_profile'], self.dict_clothesdryer['progress'])]).flatten()
                         )
                     )
-                # ### update ldc_signal
-                # self.dict_clothesdryer.update(read_signal(ldc_signal=self.dict_clothesdryer['ldc_signal'], 
-                #   new_signal=self.dict_common['ldc_signal'], 
-                #   resolution=self.resolution,
-                #   n_units=self.dict_devices['clothesdryer']['n_units'],
-                #   delay=self.delay, 
-                #   step_size=self.dict_common['step_size'],
-                #   simulation=self.simulation))
+
                 ### update ldc_dongle approval for the proposed status and demand
                 self.dict_clothesdryer.update(ldc_dongle(self.dict_clothesdryer, self.dict_common))
                 
@@ -1696,22 +1629,21 @@ class Aggregator(multiprocessing.Process):
                         unixtime=self.dict_common['unixtime'],
                         connected=self.dict_clothesdryer['connected'])
                     )
-                if self.simulation==0:
-                    ### read actual sensors
-                    pass
-                else:
-                    ### save data
-                    if self.save_history:
-                        if self.summary:
-                            dict_save.update(prepare_summary(states=self.dict_clothesdryer, common=self.dict_common))
-                        else:
-                            dict_save.update(prepare_data(states=self.dict_clothesdryer, common=self.dict_common))
+                
 
-                        if (len(dict_save.keys())>=self.save_interval) and (self.case!=None):
-                            dict_save = save_data(dict_save, case=self.case,  folder=self.casefolder, filename='clothesdryer.h5', summary=self.summary)
-                    
                 ### send data to main
                 self.pipe_agg_clothesdryer1.send(self.dict_clothesdryer)
+
+                ### save data
+                if self.simulation and self.save_history:
+                    if self.summary:
+                        dict_save.update(prepare_summary(states=self.dict_clothesdryer, common=self.dict_common))
+                    else:
+                        dict_save.update(prepare_data(states=self.dict_clothesdryer, common=self.dict_common))
+
+                    if (len(dict_save.keys())>=self.save_interval) and (self.case!=None):
+                        dict_save = save_data(dict_save, case=self.case,  folder=self.casefolder, filename='clothesdryer.h5', summary=self.summary)
+                
                 time.sleep(self.pause)
             except Exception as e:
                 print(f'Error clothesdryer run:{e}')
@@ -1746,10 +1678,7 @@ class Aggregator(multiprocessing.Process):
         while True:
             try:
                 ### update environment models, e.g., air change, water usage, mass_flow, connected, etc.
-                old_common = self.dict_common.copy()
                 self.dict_common.update(self.pipe_agg_dishwasher1.recv())
-                self.dict_common['step_size'] = self.dict_common['unixtime'] - old_common['unixtime']
-                
                 if self.dict_common['is_alive']==False:
                     raise KeyboardInterrupt
 
@@ -1762,12 +1691,14 @@ class Aggregator(multiprocessing.Process):
                         unixend=self.dict_dishwasher['unixend'],
                         schedule_skew=self.dict_dishwasher['schedule_skew'])
                     )
+
                 ## update if connected
                 self.dict_dishwasher.update(
                     is_connected(unixtime=self.dict_common['unixtime'],
                         unixstart=self.dict_dishwasher['unixstart'],
                         unixend=self.dict_dishwasher['unixend'])
                     )
+
                 ### update device proposed mode, status, priority, and demand
                 self.dict_dishwasher.update(
                     device_ntcl(len_profile=self.dict_dishwasher['len_profile'],
@@ -1780,14 +1711,7 @@ class Aggregator(multiprocessing.Process):
                         proposed_demand=np.array([dict_data[k][int((x*y)%x)] for k, x, y in zip(self.dict_dishwasher['profile'], self.dict_dishwasher['len_profile'], self.dict_dishwasher['progress'])]).flatten(),
                         )
                     )
-                # ### update ldc_signal
-                # self.dict_dishwasher.update(read_signal(ldc_signal=self.dict_dishwasher['ldc_signal'], 
-                #   new_signal=self.dict_common['ldc_signal'], 
-                #   resolution=self.resolution,
-                #   n_units=self.dict_devices['dishwasher']['n_units'],
-                #   delay=self.delay, 
-                #   step_size=self.dict_common['step_size'],
-                #   simulation=self.simulation))
+
                 ### update ldc_dongle approval for the proposed status and demand
                 self.dict_dishwasher.update(ldc_dongle(self.dict_dishwasher, self.dict_common))
                 
@@ -1800,22 +1724,20 @@ class Aggregator(multiprocessing.Process):
                         unixtime=self.dict_common['unixtime'],
                         connected=self.dict_dishwasher['connected'])
                     )
-                if self.simulation==0:
-                    ### read actual sensors
-                    pass
-                else:
-                    ### save data
-                    if self.save_history:
-                        if self.summary:
-                            dict_save.update(prepare_summary(states=self.dict_dishwasher, common=self.dict_common))
-                        else:
-                            dict_save.update(prepare_data(states=self.dict_dishwasher, common=self.dict_common))
 
-                        if (len(dict_save.keys())>=self.save_interval) and (self.case!=None):
-                            dict_save = save_data(dict_save, case=self.case,  folder=self.casefolder, filename='dishwasher.h5', summary=self.summary)
-                        
                 ### send data to main
                 self.pipe_agg_dishwasher1.send(self.dict_dishwasher)
+
+                ### save data
+                if self.simulation and self.save_history:
+                    if self.summary:
+                        dict_save.update(prepare_summary(states=self.dict_dishwasher, common=self.dict_common))
+                    else:
+                        dict_save.update(prepare_data(states=self.dict_dishwasher, common=self.dict_common))
+
+                    if (len(dict_save.keys())>=self.save_interval) and (self.case!=None):
+                        dict_save = save_data(dict_save, case=self.case,  folder=self.casefolder, filename='dishwasher.h5', summary=self.summary)
+                    
                 time.sleep(self.pause)
             except Exception as e:
                 print(f'Error dishwasher run:{e}')
@@ -1845,10 +1767,7 @@ class Aggregator(multiprocessing.Process):
         ### run profiles
         while True:
             try:
-                old_common = self.dict_common.copy()
                 self.dict_common.update(self.pipe_agg_ev1.recv())
-                self.dict_common['step_size'] = self.dict_common['unixtime'] - old_common['unixtime']
-                
                 if self.dict_common['is_alive']==False:
                     raise KeyboardInterrupt 
 
@@ -1861,12 +1780,14 @@ class Aggregator(multiprocessing.Process):
                         unixend=self.dict_ev['unixend'],
                         schedule_skew=self.dict_ev['schedule_skew'])
                     )
+
                 ### update if connected
                 self.dict_ev.update(
                     is_connected(unixtime=self.dict_common['unixtime'],
                         unixstart=self.dict_ev['unixstart'],
                         unixend=self.dict_ev['unixend'])
                     )
+
                 ### update device proposed mode, status, priority, and demand
                 self.dict_ev.update(
                     device_battery(unixtime=self.dict_common['unixtime'], 
@@ -1893,14 +1814,7 @@ class Aggregator(multiprocessing.Process):
                     #   actual_status=self.dict_ev['actual_status'])
                     #   proposed_demand=np.diag(df.loc[self.dict_ev['soc'].round(3), self.dict_ev['profile']].interpolate()),
                     )
-                # ### update ldc_signal
-                # self.dict_ev.update(read_signal(ldc_signal=self.dict_ev['ldc_signal'], 
-                #   new_signal=self.dict_common['ldc_signal'], 
-                #   resolution=self.resolution,
-                #   n_units=self.dict_devices['ev']['n_units'],
-                #   delay=self.delay, 
-                #   step_size=self.dict_common['step_size'],
-                #   simulation=self.simulation))
+
                 ### update ldc_dongle approval for the proposed status and demand
                 self.dict_ev.update(ldc_dongle(self.dict_ev, self.dict_common))
                 
@@ -1914,22 +1828,21 @@ class Aggregator(multiprocessing.Process):
                         unixtime=self.dict_common['unixtime'],
                         step_size=self.dict_common['step_size'])
                     )
-                if self.simulation==0:
-                    ### read actual sensors
-                    pass
-                else:
-                    ### save data
-                    if self.save_history:
-                        if self.summary:
-                            dict_save.update(prepare_summary(states=self.dict_ev, common=self.dict_common))
-                        else:
-                            dict_save.update(prepare_data(states=self.dict_ev, common=self.dict_common))
+                
 
-                        if (len(dict_save.keys())>=self.save_interval) and (self.case!=None):
-                            dict_save = save_data(dict_save, case=self.case,  folder=self.casefolder, filename='ev.h5', summary=self.summary)
-                    
                 ### send data to main
-                self.pipe_agg_ev1.send(self.dict_ev)  
+                self.pipe_agg_ev1.send(self.dict_ev)
+
+                ### save data
+                if self.simulation and self.save_history:
+                    if self.summary:
+                        dict_save.update(prepare_summary(states=self.dict_ev, common=self.dict_common))
+                    else:
+                        dict_save.update(prepare_data(states=self.dict_ev, common=self.dict_common))
+
+                    if (len(dict_save.keys())>=self.save_interval) and (self.case!=None):
+                        dict_save = save_data(dict_save, case=self.case,  folder=self.casefolder, filename='ev.h5', summary=self.summary)
+                    
                 time.sleep(self.pause)
             except Exception as e:
                 print(f'Error ev run:{e}')
@@ -1951,14 +1864,10 @@ class Aggregator(multiprocessing.Process):
         dict_save = {}
         while True:
             try:
-                old_common = self.dict_common.copy()
                 self.dict_common.update(self.pipe_agg_storage1.recv())
-                self.dict_common['step_size'] = self.dict_common['unixtime'] - old_common['unixtime']
-                
                 if self.dict_common['is_alive']==False:
                     raise KeyboardInterrupt
 
-                self.dict_storage.update(self.dict_common)
                 ### update unixstart and unixend
                 self.dict_storage.update(
                     make_schedule(unixtime=self.dict_common['unixtime'],
@@ -2000,14 +1909,7 @@ class Aggregator(multiprocessing.Process):
                     #   actual_status=self.dict_storage['actual_status'],
                     #   proposed_demand=self.dict_storage['charging_power'])
                     )
-                # ### update ldc_signal
-                # self.dict_storage.update(read_signal(ldc_signal=self.dict_storage['ldc_signal'], 
-                #   new_signal=self.dict_common['ldc_signal'], 
-                #   resolution=self.resolution,
-                #   n_units=self.dict_devices['storage']['n_units'],
-                #   delay=self.delay, 
-                #   step_size=self.dict_common['step_size'],
-                #   simulation=self.simulation))
+
                 ### update ldc_dongle approval for the proposed status and demand
                 self.dict_storage.update(ldc_dongle(self.dict_storage, self.dict_common))
                 
@@ -2021,22 +1923,20 @@ class Aggregator(multiprocessing.Process):
                         unixtime=self.dict_common['unixtime'],
                         step_size=self.dict_common['step_size'])
                     )
-                if self.simulation==0:
-                    ### read actual sensors
-                    pass
-                else:
-                    ### save data
-                    if self.save_history:
-                        if self.summary:
-                            dict_save.update(prepare_summary(states=self.dict_storage, common=self.dict_common))
-                        else:
-                            dict_save.update(prepare_data(states=self.dict_storage, common=self.dict_common))
 
-                        if (len(dict_save.keys())>=self.save_interval) and (self.case!=None):
-                            dict_save = save_data(dict_save, case=self.case,  folder=self.casefolder, filename='storage.h5', summary=self.summary)
-                    
                 ### send data to main
                 self.pipe_agg_storage1.send(self.dict_storage)
+
+                ### save data
+                if self.simulation and self.save_history:
+                    if self.summary:
+                        dict_save.update(prepare_summary(states=self.dict_storage, common=self.dict_common))
+                    else:
+                        dict_save.update(prepare_data(states=self.dict_storage, common=self.dict_common))
+
+                    if (len(dict_save.keys())>=self.save_interval) and (self.case!=None):
+                        dict_save = save_data(dict_save, case=self.case,  folder=self.casefolder, filename='storage.h5', summary=self.summary)
+                
                 time.sleep(self.pause)
             except Exception as e:
                 print("Error AGGREGATOR.storage:{}".format(e))
@@ -2057,10 +1957,7 @@ class Aggregator(multiprocessing.Process):
         dict_save = {}
         while True:
             try:
-                old_common = self.dict_common.copy()
                 self.dict_common.update(self.pipe_agg_solar1.recv())
-                self.dict_common['step_size'] = self.dict_common['unixtime'] - old_common['unixtime']
-                
                 if self.dict_common['is_alive']==False:
                     raise KeyboardInterrupt
 
@@ -2123,8 +2020,10 @@ class Aggregator(multiprocessing.Process):
                             self.dict_solar['inverter_efficiency'])*-1
                     ]
                     ))}
+
                 ### send data to main
                 self.pipe_agg_solar1.send(self.dict_solar)
+
                 ### save data
                 if self.simulation==1 and self.save_history:
                     if self.summary:
@@ -2156,14 +2055,13 @@ class Aggregator(multiprocessing.Process):
         dict_save = {}
         while True:
             try:
-                old_common = self.dict_common.copy()
                 self.dict_common.update(self.pipe_agg_wind1.recv())
-                self.dict_common['step_size'] = self.dict_common['unixtime'] - old_common['unixtime']
-                
                 if self.dict_common['is_alive']==False:
                     raise KeyboardInterrupt
+                
                 ### send data to main
                 self.pipe_agg_wind1.send(self.dict_wind)
+
                 ### save data
                 if self.simulation==1 and self.save_history:
                     if self.summary:
@@ -2351,10 +2249,8 @@ class Aggregator(multiprocessing.Process):
 
     def drive_grainy(self):
         # initialization to drive the pifacedigital
-        active = True
-        while active:
+        while True:
             try:
-                time.sleep(15)  # delay 15 seconds to allow hardware to bootup
                 ### setup raspi
                 import serial
                 import pifacedigitalio
@@ -2377,95 +2273,97 @@ class Aggregator(multiprocessing.Process):
                 [peer_states.update(MULTICAST.send(dict_msg={'states':'all'}, ip=f'{subnet}.{x}', port=17001, timeout=0.5, data_bytes=4096, hops=1)) for x in range(100, 114)]
                 peer_address = [k for k, v in peer_states.items() if (v and not (k.endswith('.100') or k.endswith('.101')))]
                 print(f"Peers:{peer_address}")
-                
-                while True:
-                    try:
-                        ### get data from local process
-                        dict_agg = self.pipe_agg_grainy1.recv()
-                        if len(dict_agg.keys())==0: 
-                            continue
-                        
-                        self.dict_common.update(dict_agg['common'])
-                        if self.dict_common['is_alive']==False: 
-                            raise KeyboardInterrupt
-                        
-                        self.dict_summary_demand = dict_agg['summary']['demand'] 
-                        ### get peer states
-                        self.dict_state = dict_agg['states']
-                        [peer_states.update(MULTICAST.send(dict_msg={'states':'all'}, ip=ip, port=17001, timeout=0.2, data_bytes=4096, hops=1)) for ip in peer_address]
-                        for address, state in peer_states.items():
-                            self.dict_state.update(state)
-                            for k, v in state.items():
-                                if k.endswith('actual_demand'):
-                                    self.dict_summary_demand.update({k:float(v)})
-
-                        ### add all demand except heatpump and waterheater demand
-                        total = np.sum([np.sum(self.dict_summary_demand[k]) for k in self.dict_summary_demand.keys() if not (k.startswith('heatpump') or k.startswith('waterheater'))])
-                        total = min([total, 10e3]) #limit to 10kW
-
-                        ### convert total load value into 8-bit binary to drive 8 pinouts of piface
-                        newpins, grainy, chroma = FUNCTIONS.relay_pinouts(total, self.df_relay, self.df_states, report=False)
-                        
-                        ### execute piface command
-                        for i in range(len(self.pins)):
-                            if self.pins[i]==0 and newpins[i]==1:
-                                self.pf.output_pins[i].turn_on()
-                            elif self.pins[i]==1 and newpins[i]==0:
-                                self.pf.output_pins[i].turn_off()
-                        self.pins = newpins  # store updated pin states
-
-                        ### execute chroma emulation, send through rs232
-                        rs232 = serial.Serial(
-                            port='/dev/ttyUSB0',
-                            baudrate = 57600,
-                            parity=serial.PARITY_NONE,
-                            stopbits=serial.STOPBITS_ONE,
-                            bytesize=serial.EIGHTBITS,
-                            timeout=1)
-                        if chroma<=0:
-                            rs232.write(b'LOAD OFF\r\n')
-                        else:    
-                            rs232.write(b'CURR:PEAK:MAX 28\r\n')
-                            rs232.write(b'MODE POW\r\n')
-                            cmd = 'POW '+ str(chroma) +'\r\n'
-                            rs232.write(cmd.encode())
-                            rs232.write(b'LOAD ON\r\n')
-
-                        
-                        ### update meter reading
-                        peer_states.update(MULTICAST.send(dict_msg={'states':'all'}, ip=f'{subnet}.101', port=17001, timeout=0.2, data_bytes=4096, hops=1))
-                        for address, state in peer_states.items():
-                            self.dict_state.update(state)
-                            
-                        ### save all states
-                        self.dict_state.update({"unixtime": self.dict_common['unixtime'] })
-                        self.dict_history.update({self.dict_common['unixtime']: self.dict_state})            
-                        self.dict_history = self.save_pickle(dict_data=self.dict_history, path=f'/home/pi/ldc_project/history/H{self.house_num}_{self.dict_common["today"]}.pkl')
-                        ### compress saved data at start of new day
-                        if self.dict_common['today']!=last_day:
-                            self.compress_pickle(path=f'/home/pi/ldc_project/history/H{self.house_num}_{last_day}.pkl')
-                        last_day = self.dict_common['today']
-
-                        ### update state of other devices, e.g., doors, windows
-                        if (self.dict_common['unixtime'] % 15 < 1) and (self.house_num==1):
-                            [peer_states.update(MULTICAST.send(dict_msg={'states':'all'}, ip=f'192.168.11.{x}', port=17001, timeout=0.2, data_bytes=4096, hops=1)) for x in range(114, 126)]
-                            
-                        self.pipe_agg_grainy1.send({'emulated_demand': {'grainy': grainy, 'chroma': chroma}})
-                        time.sleep(self.pause)
-                    except KeyboardInterrupt:
-                        print("Terminating grainy load driver...")
-                        self.pipe_agg_grainy1.close()
-                        for i in range(len(self.pins)):
-                            self.pf.output_pins[i].turn_off()
-                        active = False  # to break from the main loop
-                        break  # break from inner loop
-                    except Exception as e:
-                        print("Error drive_grainy:", e)
-                        self.pipe_agg_grainy1.send({})
+                break
             except Exception as e:
-                print("Error setting up piface:{}".format(e))
-                break  # break from main loop
+                print(f"Error AGGREGATOR.drive_grainy.setup:{e}")
+                time.sleep(30)
+            except KeyboardInterrupt:
+                break
 
+        while True:
+            try:
+                ### get data from local process
+                dict_agg = self.pipe_agg_grainy1.recv()
+                if len(dict_agg.keys())==0: 
+                    continue
+                
+                self.dict_common.update(dict_agg['common'])
+                if self.dict_common['is_alive']==False: 
+                    raise KeyboardInterrupt
+                
+                self.dict_summary_demand = dict_agg['summary']['demand'] 
+                ### get peer states
+                self.dict_state = dict_agg['states']
+                [peer_states.update(MULTICAST.send(dict_msg={'states':'all'}, ip=ip, port=17001, timeout=0.2, data_bytes=4096, hops=1)) for ip in peer_address]
+                for address, state in peer_states.items():
+                    self.dict_state.update(state)
+                    for k, v in state.items():
+                        if k.endswith('actual_demand'):
+                            self.dict_summary_demand.update({k:float(v)})
+
+                ### add all demand except heatpump and waterheater demand
+                total = np.sum([np.sum(self.dict_summary_demand[k]) for k in self.dict_summary_demand.keys() if not (k.startswith('heatpump') or k.startswith('waterheater'))])
+                total = min([total, 10e3]) #limit to 10kW
+
+                ### convert total load value into 8-bit binary to drive 8 pinouts of piface
+                newpins, grainy, chroma = FUNCTIONS.relay_pinouts(total, self.df_relay, self.df_states, report=False)
+                
+                ### execute piface command
+                for i in range(len(self.pins)):
+                    if self.pins[i]==0 and newpins[i]==1:
+                        self.pf.output_pins[i].turn_on()
+                    elif self.pins[i]==1 and newpins[i]==0:
+                        self.pf.output_pins[i].turn_off()
+                self.pins = newpins  # store updated pin states
+
+                ### execute chroma emulation, send through rs232
+                rs232 = serial.Serial(
+                    port='/dev/ttyUSB0',
+                    baudrate = 57600,
+                    parity=serial.PARITY_NONE,
+                    stopbits=serial.STOPBITS_ONE,
+                    bytesize=serial.EIGHTBITS,
+                    timeout=1)
+                if chroma<=0:
+                    rs232.write(b'LOAD OFF\r\n')
+                else:    
+                    rs232.write(b'CURR:PEAK:MAX 28\r\n')
+                    rs232.write(b'MODE POW\r\n')
+                    cmd = 'POW '+ str(chroma) +'\r\n'
+                    rs232.write(cmd.encode())
+                    rs232.write(b'LOAD ON\r\n')
+
+                
+                ### update meter reading
+                peer_states.update(MULTICAST.send(dict_msg={'states':'all'}, ip=f'{subnet}.101', port=17001, timeout=0.2, data_bytes=4096, hops=1))
+                for address, state in peer_states.items():
+                    self.dict_state.update(state)
+                    
+                ### save all states
+                self.dict_state.update({"unixtime": self.dict_common['unixtime'] })
+                self.dict_history.update({self.dict_common['unixtime']: self.dict_state})            
+                self.dict_history = self.save_pickle(dict_data=self.dict_history, path=f'/home/pi/ldc_project/history/H{self.house_num}_{self.dict_common["today"]}.pkl')
+                ### compress saved data at start of new day
+                if self.dict_common['today']!=last_day:
+                    self.compress_pickle(path=f'/home/pi/ldc_project/history/H{self.house_num}_{last_day}.pkl')
+                last_day = self.dict_common['today']
+
+                ### update state of other devices, e.g., doors, windows
+                if (self.dict_common['unixtime'] % 15 < 1) and (self.house_num==1):
+                    [peer_states.update(MULTICAST.send(dict_msg={'states':'all'}, ip=f'192.168.11.{x}', port=17001, timeout=0.2, data_bytes=4096, hops=1)) for x in range(114, 126)]
+                    
+                self.pipe_agg_grainy1.send({'emulated_demand': {'grainy': grainy, 'chroma': chroma}})
+                time.sleep(self.pause)
+            except KeyboardInterrupt:
+                print("Terminating grainy load driver...")
+                self.pipe_agg_grainy1.close()
+                for i in range(len(self.pins)):
+                    self.pf.output_pins[i].turn_off()
+                break
+            except Exception as e:
+                print("Error drive_grainy:", e)
+                self.pipe_agg_grainy1.send({})
+            
 
     @staticmethod
     def save_pickle(dict_data, path='history/data.pkl.xz'):
@@ -2514,6 +2412,7 @@ class Aggregator(multiprocessing.Process):
                 self.dict_common.update(dict_agg['common'])
                 if self.dict_common['is_alive']==False: 
                     raise KeyboardInterrupt
+                
                 ### get meter data
                 self.dict_meter.update(EM1.get_meter_data(report=self.report))  # NOTE: this step also pickles the data to disk
                 self.pipe_agg_meter1.send({'meter': self.dict_meter})

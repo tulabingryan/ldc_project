@@ -147,7 +147,7 @@ def send_data():
                     if last_edit < os.stat(p).st_mtime:
                         last_edit = os.stat(p).st_mtime
                         compress_pickle(p)
-                                                     
+
                         sync_files(
                             dict_paths={
                                 '/home/pi/ldc_project/history/': 'pi@192.168.1.81:/home/pi/studies/ardmore/data/',
@@ -157,13 +157,14 @@ def send_data():
                         
                 if now.second == 0:  # only send every minute
                     for p in glob.glob(f'/home/pi/ldc_project/logs/*'):
-                        sync_files(
-                            dict_paths={'/home/pi/ldc_project/logs/': 'pi@192.168.1.81:/home/pi/studies/ardmore/logs/'},
-                            remove_source=False)
-        
-                        if os.stat(p).st_size >= 1e6: # 1MB limit
-                            os.system(f'sudo rm {p}')
-                            os.system('sudo reboot')  # reboot the system
+                        if os.stat(p).st_mtime > (time.time()-60):  ### sync only if updated recently
+                            sync_files(
+                                dict_paths={'/home/pi/ldc_project/logs/': 'pi@192.168.1.81:/home/pi/studies/ardmore/logs/'},
+                                remove_source=False)
+            
+                            if os.stat(p).st_size >= 1e6: # 1MB limit
+                                os.system(f'sudo rm {p}')
+                                os.system('sudo reboot')  # reboot the system
                         
 
                 

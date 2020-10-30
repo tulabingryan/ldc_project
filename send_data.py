@@ -82,7 +82,7 @@ def sync_files(dict_paths, remove_source=False, options='-auzhe'):
             if remove_source:
                 os.system(f'sshpass -p "ldc" rsync {options} ssh --remove-source-files {from_path} {to_path}') 
             else:
-                os.system(f'sshpass -p "ldc" rsync {options} ssh -T /home/pi --exclude-from ".send_data-exluded" --quiet {from_path} {to_path}')
+                os.system(f'sshpass -p "ldc" rsync {options} ssh -T /home/pi --quiet --exclude-from ".send_data-exluded" {from_path} {to_path}')
         except Exception as e:
             print("Error:", e, from_path, to_path)
 
@@ -147,18 +147,26 @@ def send_data():
                     if last_edit < os.stat(p).st_mtime:
                         last_edit = os.stat(p).st_mtime
                         compress_pickle(p)
-                             
+                                                     
                         sync_files(
                             dict_paths={
                                 '/home/pi/ldc_project/history/': 'pi@192.168.1.81:/home/pi/studies/ardmore/data/',
-                                '/home/pi/ldc_project/logs/': 'pi@192.168.1.81:/home/pi/studies/ardmore/logs/',
+                                'pi@192.168.1.81:/home/pi/ldc_project/ldc_gridserver/dict_cmd.txt': '/home/pi/ldc_project/ldc_simulator/dict_cmd.txt',
                                 },
                             remove_source=False)
+                        
+                if now.second == 0:  # only send every minute
+                    for p in glob.glob(f'/home/pi/ldc_project/logs/*'):
+                        sync_files(
+                            dict_paths={'/home/pi/ldc_project/logs/': 'pi@192.168.1.81:/home/pi/studies/ardmore/logs/'},
+                            remove_source=False)
+        
+                        if os.stat(p).st_size >= 1e6: # 1MB limit
+                            os.system(f'sudo rm {p}')
+                            os.system('sudo reboot')  # reboot the system
+                        
 
-                if int(local_ip.split('.')[-1])<=112: 
-                    sync_files(
-                        dict_paths={'pi@192.168.1.81:/home/pi/ldc_project/ldc_gridserver/dict_cmd.txt': '/home/pi/ldc_project/ldc_simulator/dict_cmd.txt'},
-                        remove_source=False)
+                
 
             time.sleep(interval)
         except Exception as e:

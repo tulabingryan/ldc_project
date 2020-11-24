@@ -2220,7 +2220,7 @@ def create_evSpecs(n_evs, ldc_adoption, v2g_adoption, df_houseSpecs, renew=False
             df_evSpecs['leakage'] = FUNCTIONS.populate(n_evs,0.9*1e-7, 1.1*1e-7, 1e-7) #[0..1] charge loss at standby mode
             df_evSpecs['trip_distance'] = FUNCTIONS.populate(n_evs, 10, 50, 20) # [km] avg daily trip
             df_evSpecs['trip_time'] = FUNCTIONS.populate(n_evs, 0.25, 2, 0.75) #[hours] avg daily trip
-            df_evSpecs['km_per_kwh'] = FUNCTIONS.populate(n_evs, 6.0, 7.0, 6.5) #[km/kWh] 1kWh per 6.5 km avg 
+            df_evSpecs['km_per_kwh'] = FUNCTIONS.populate(n_evs, 4.225, 6.76, 6.5) #[km/kWh] 1kWh per 6.5 km avg 
             df_evSpecs['with_dr'] = np.random.choice([True, False], n_evs, p=[ldc_adoption, 1-ldc_adoption])
             df_evSpecs['with_v2g'] = np.random.choice([True, False], n_evs, p=[v2g_adoption, 1-v2g_adoption])
             

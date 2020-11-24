@@ -418,7 +418,6 @@ def save_pickle(dict_data, path='history/data.pkl.xz'):
     'Save data as pickle file.'
     try:
         df_all = pd.DataFrame.from_dict(dict_data, orient='index')
-        df_all.index = pd.to_datetime(df_all.index, unit='s').tz_localize('UTC').tz_convert('Pacific/Auckland')
         try:
             on_disk = pd.read_pickle(path, compression='infer')
             df_all = pd.concat([on_disk, df_all], axis=0, sort=False)
@@ -537,7 +536,7 @@ def clock(unixtime, realtime=True, step_size=1):
         timestamp = time.time()
         step_size = np.subtract(timestamp, unixtime)
     else:
-        step_size = step_size #np.random.uniform(0.1, step_size)
+        # step_size = np.random.uniform(0.1, step_size*2)
         timestamp = np.mean(np.add(unixtime, step_size))
     dt = pd.to_datetime(timestamp, unit='s').tz_localize('UTC').tz_convert('Pacific/Auckland')
     return {
@@ -586,30 +585,15 @@ def clock(unixtime, realtime=True, step_size=1):
 
 
 ################ models for end-uses ###################################################
-# def enduse_tcl(heat_all,temp_in, temp_out, temp_fill, Ua, Ca, Cp, mass_flow, step_size):
-#         '''
-#         dTz/dt = Q + mCp(Tf-Tz) + U(To-Tz)
-#         '''
-#         try:
-#             R = np.divide(1,Ua)
-#             tt = np.add(np.multiply(mass_flow, np.multiply(Cp, R)), 1)
-#             tau = np.divide(np.multiply(Ca, R), tt)
-#             a = np.exp(-np.divide(step_size, tau))
-#             temp_in = np.add(np.multiply(a,temp_in), 
-#                             np.multiply(np.subtract(1, a), np.divide(np.add(temp_out, np.add(np.multiply(R,heat_all), 
-#                             np.multiply(np.multiply(mass_flow, Cp),np.multiply(R, temp_fill)))), tt) )) 
-#             return {'temp_in':np.add(temp_in, np.random.normal(0.0,1e-3))}
-
-#         except Exception as e:
-#                 print(e)
-
-from numba import vectorize
-
-@vectorize(nopython=True)
-def enduse_tcl(temp_in, temp_out, temp_fill, heat_all, Ua, Ca, Cp, mass_flow, step_size):
+### TCL ###
+def compute_temp_in(temp_in, temp_out, temp_fill, heat_all, Ua, Ca, Cp, mass_flow, step_size):
     """
-    Model for thermal zone. Two-state RC model
+    Compute the temperature inside the thermal zone based on the model:
+    Two-state RC model defined by dynamic equation:
     dTz/dt = Q + mCp(Tf-Tz) + U(To-Tz)
+
+    Solution is:
+    Tz = (QR + mCpRTf + To) / (mCpR+1) + ((e^(-tRC/(mCpR+1))) * (K mCpR + K -(QR+mCpR Tf + To))/(mCpR+1))
     
     Args:
         temp_in : temperature inside the thermal zone [°C]
@@ -632,554 +616,881 @@ def enduse_tcl(temp_in, temp_out, temp_fill, heat_all, Ua, Ca, Cp, mass_flow, st
     tt = (mass_flow * (Cp*R)) + 1
     tau = (Ca*R) / tt
     a = np.exp(-(step_size / tau))
-    
     return ((a*temp_in) + ((1-a) * ((temp_out + ((R*heat_all) + ((mass_flow*Cp)*(R*temp_fill)))) / tt) ))
+
+
+def enduse_tcl(states):
+    '''
+    Wrapper for enduse model of thermostat-controlled loads.
+    
+    Args:
+        states: state parameters of the device
+    
+    Returns:
+        states: updated state parameters
+    '''
+    states['temp_fill'] = states['temp_out']
+
+    states['heat_all'] = np.add(
+        states['solar_heat'], 
+        states['power_thermal']
+        ) 
+    states['temp_in'] = compute_temp_in(
+        states['temp_in'], 
+        states['temp_out'], 
+        states['temp_fill'], 
+        states['heat_all'], 
+        states['Ua'], 
+        states['Ca'], 
+        states['Cp'], 
+        states['mass_flow'], 
+        states['step_size'],
+        )
+
+    return states
+
+### battery ###
+def compute_soc(soc, actual_demand, capacity, step_size):
+    '''
+    Calculate the state of charge based on a math model.
+    
+    Args:
+        soc: state of charge of the battery
+        actual_demand: power demand to charge the battery
+        capacity: battery rated capacity
+        step_size: time step
+
+    Returns:
+        soc: updated state of charge
+
+    References:
+
+    '''
+    return ((actual_demand*step_size) + (soc*capacity)) / capacity
+
+
+def compute_battery_demand(driving, driving_power, actual_demand):
+    '''
+    Calculate the state of charge based on a math model.
+    
+    Args:
+        driving: boolean if currently driving
+        driving_power: power extracted from battery to EV motors
+        
+    Returns:
+        driving_power: power extracted from the battery
+
+    References:
+
+    '''
+    if driving==1:
+        return driving_power
+    else:
+        return actual_demand
+
+
+def compute_progress_battery(soc, target_soc, connected):
+    '''
+    Calculate charging progress.
+
+    Args:
+        soc: state of charge of the battery [0..1]
+        target_soc: target state of charge [0..1]
+        connected: state of device if plugged in or not [0,1]
+
+    Returns:
+        progress: progress of charging with respect to desired soc
+
+    References:
+
+    '''
+    return (soc/target_soc)*connected
+
+def enduse_battery(states):
+    '''
+    Wrapper for model of battery-based loads.
+    
+    Args:
+        states: state parameters of the device
+    
+    Returns:
+        states: updated state parameters
+        
+    '''
+    if 'ev' in states['load_type']:
+        states['soc'] = compute_soc(
+            states['soc'],
+            compute_battery_demand(
+                states['driving'], 
+                states['driving_power'],
+                states['actual_demand'],
+                ),
+            states['capacity'], 
+            states['step_size'],
+            )
+
+    else:
+        states['soc'] = compute_soc(
+            states['soc'], 
+            states['actual_demand'], 
+            states['capacity'], 
+            states['step_size'],
+            )
+
+    states['progress'] = compute_progress_battery(
+        states['soc'], 
+        states['target_soc'], 
+        states['connected'],
+        )
+
+    return states
     
 
-# def enduse_tcl(heat_all, air_part, temp_in, temp_mat, temp_out, Um, Ua, Cp, Ca, Cm, 
-#   mass_flow, step_size, unixtime, connected):
-#   # update temp_in and temp_mat, and temp_in_active, i.e., for connected tcls
-#   '''
-#   CdT/dt = Ua(Ta-T)  
-#   '''
-#   count = 0
-#   increment = 0.2
-#   while count < step_size:
-#     # for air temp
-#     old_temp = temp_in
-#     Q_h =  np.multiply(heat_all, air_part)
-#     Q_mat =  np.multiply(np.subtract(temp_mat, temp_in), Um)
-#     Q_ambient = np.multiply(np.subtract(temp_out, temp_in), Ua)
-#     Q_mass = np.multiply(np.subtract(temp_out, temp_in), np.multiply(mass_flow, Cp))
-#     dtemp = np.divide(np.add(Q_h, np.add(Q_mat, np.add(Q_ambient, Q_mass))), Ca)
-#     temp_in = np.add(temp_in, np.multiply(dtemp, increment))
-#     # print(old_temp[0], Q_h[0], Q_mat[0], Q_ambient[0], Q_mass[0], dtemp[0])
-#     # for material temp
-#     temp_mat = np.add(temp_mat, np.multiply(np.divide(np.subtract(np.multiply(heat_all, 
-#       np.subtract(1, air_part)), np.multiply(np.subtract(temp_mat, temp_in), Um)), Cm), increment))
-#     count = np.add(count, increment)  
-#   temp_in_active = temp_in[np.where(connected>0)]
-#   return {
-#     'temp_in':temp_in, 
-#     'temp_mat':temp_mat,
-#     'temp_in_active': temp_in_active
-#     }
 
+### NTCL ###
+def compute_progress_ntcl(progress, len_profile, step_size, actual_status, connected):
+    '''
+    Model for usage of non-urgent non-thermostat controlled load.
 
-# def enduse_tcl(heat_all, air_part, temp_in, temp_mat, temp_out, Um, Ua, Cp, Ca, Cm, 
-#   mass_flow, step_size, unixtime, connected):
-#   '''Model for a thermal zone
-#   Tin(t+1) = Tin(t) + (dt/2 * (Tin(t) + dTin))
-#   where, 
-#     dTin = (Q_device + Q_in + (air_part)Q_solar + Q_ambient + Q_refill) ; Q_device = heat from heatpump, Q_in=heat from inner sources, Q_solar=heat from solar, Q_ambient=heat from outside, Q_refill=heat from mass flow
-#     dTin =  (Q_device + Q_in + (air_part)*Q_solar + Ua(Ta_Tin) + (mass_flow*Cp*(T_refill-Tin)))
+    Args:
+        progress: job progress [0..1]
+        profile_duration: duration of the entire job profile [s]
+        step_size: time step [s]
+        actual_status: ON or OFF status of the device [0,1]
+        connected: status if the device is plugged-in [0,1]
 
-#   '''
-#   try:
-#     temp_refill = temp_out
-#     air_part = 1 # comment out if needed
-#     count = 0
-#     dt = step_size
-#     while count < step_size:
-#       # for air temp
-#       Q_ambient = np.multiply(Ua, np.subtract(temp_out, temp_in))
-#       Q_refill = np.multiply(np.multiply(mass_flow, Cp), np.subtract(temp_refill, temp_in))
-#       Q_mat = np.multiply(Um, np.subtract(temp_mat, temp_in))
-#       dtemp_in = np.divide((np.add(np.multiply(heat_all, air_part), np.add(Q_ambient, np.add(Q_refill, Q_mat)))), Ca)
-#       temp_in = np.add(temp_in, np.multiply(np.add(temp_in, dtemp_in), dt/2))
-            
-#       # for material temp
-#       Q_in = np.multiply(Um, np.subtract(temp_in, temp_mat))
-#       dtemp_mat = np.divide((np.add(np.multiply(heat_all, 1-air_part), Q_in)), Cm)
-#       temp_mat = np.add(temp_mat, np.multiply(np.add(temp_mat, dtemp_mat), dt/2))
-            
-#       count = np.add(count, dt)  
-#     # temp_in_active = temp_in[np.where(connected>0)]
-#   except Exception as e:
-#     print("Error MODELS.enduse_tcl:", e)
+    Returns:
+        progress: updated progress of the device job
 
-#   return {
-#     'temp_in':temp_in, 
-#     'temp_mat':temp_mat,
-#     # 'temp_in_active': temp_in_active
-#     }
+    '''
+    return (progress + ((step_size/len_profile)*actual_status)) * connected
+    
+    
+def enduse_ntcl(states):
+    '''
+    Wrapper for enduse model of non-urgent non-TCL.
 
+    Args:
+        states: state parameters of the device
+    
+    Returns:
+        states: updated state parameters
+    '''
+    states['progress'] = compute_progress_ntcl(
+        states['progress'], 
+        states['len_profile'], 
+        states['step_size'], 
+        states['actual_status'], 
+        states['connected'],
+        )
+    
+    states['soc'] = states['progress']
 
+    return states
 
-
-# ### test enduse_tcl
-# enduse_tcl(heat_all=np.random.normal(2345, 100, 10), 
-#   air_part=np.random.normal(0.5,0.0001,10), 
-#   temp_in=np.random.normal(20,0.1,10), 
-#   temp_mat=np.random.normal(20,0.1,10), 
-#   temp_out=np.random.normal(10,0.1,10), 
-#   Um=np.random.normal(75,0.1,10), 
-#   Ua=np.random.normal(80,0.1,10),
-#   Cp=np.ones(10)*1006, 
-#   Ca=np.random.normal(30,0.1,10)*1.25*1006, 
-#   Cm=np.random.normal(3,0.001,10)*1.25*4186, 
-#   mass_flow=np.random.normal(0.05, 1e-6,10), 
-#   step_size=1, 
-#   unixtime=time.time(), 
-#   connected=np.ones(10))
-
-
-
-
-
-
-# def enduse_storage(soc, power, capacity, step_size):
-#   # update soc
-#   return np.divide(np.add(np.multiply(power, step_size), 
-#     np.multiply(soc, capacity)), capacity)  # soc
-
-def enduse_ev(soc, target_soc, actual_demand, capacity, connected, unixtime, step_size):
-    # update soc
-    soc = np.divide(np.add(np.multiply(actual_demand, step_size), 
-        np.multiply(soc, capacity)), capacity)  # new soc [ratio] 
-    progress = np.divide(soc, target_soc)
-    unfinished = np.multiply(progress, (progress<1) * 1)  # unfinished tasks
-    finished = (progress>=1) * 1  # finished tasks
-    progress = np.abs(np.multiply(np.add(unfinished, finished), connected))
-    return {
-        'unfinished': unfinished,
-        'finished': finished,
-        'progress': progress,
-        'soc': soc}
-
-def enduse_storage(soc, target_soc, actual_demand, capacity, connected, unixtime, step_size):
-    # update soc
-    soc = np.divide(np.add(np.multiply(actual_demand, step_size), 
-        np.multiply(soc, capacity)), capacity)  # new soc [ratio] 
-    progress = np.divide(soc, target_soc)
-    unfinished = np.multiply(progress, (progress<1) * 1)  # unfinished tasks
-    finished = (progress>=1) * 1  # finished tasks
-    progress = np.abs(np.multiply(np.add(unfinished, finished), connected))
-    return {
-        'unfinished': unfinished,
-        'finished': finished,
-        'progress': progress,
-        'soc': soc}
-
-def enduse_ntcl(len_profile, progress, step_size, actual_status, unixtime, connected):
-    # update job status
-    try:
-        progress = np.add(progress, np.multiply(np.divide(step_size, len_profile), actual_status))
-        unfinished = np.multiply(progress, (progress<1) * 1)  # unfinished tasks
-        finished = (progress>=1) * 1  # finished tasks
-        progress = np.multiply(progress, connected)
-
-        return {
-            'unfinished': unfinished,
-            'finished': finished,
-            'progress': progress}
-    except Exception as e:
-        print(f"Error MODELS.enduse_ntcl:{e}")
 
 ############# models for devices #######################################################
-def device_cooling_compression(mode, temp_in, temp_min, temp_max, temp_target,
-    tolerance, cooling_power, cop, standby_power, ventilation_power, 
-    proposed_status, actual_status, tcl_control):
+### TCL ###
+def compute_proposed_status_tcl(mode, proposed_status, temp_in, temp_target, tolerance):
+    '''
+    Determine the status of the TCL 
+
+    Args:
+        mode: mode of operation [0=cooling, 1=heating]
+        proposed_status: previous proposed_status
+        temp_in: inside temperature
+        temp_target: target temperature
+        tolerance: setpoint tolerance
+    '''
+    if mode==0 and proposed_status==1 and temp_in>=(temp_target-tolerance):
+        return 1
+    elif mode==0 and proposed_status==0 and temp_in>=(temp_target+tolerance):
+        return 1
+    elif mode==1 and proposed_status==1 and temp_in<=(temp_target+tolerance):
+        return 1
+    elif mode==1 and proposed_status==0 and temp_in<=(temp_target-tolerance):
+        return 1
+    
+    return 0
+
+
+def compute_proposed_demand_tcl(mode, cooling_power, heating_power, standby_power, ventilation_power, proposed_status):
+    '''
+    Calculate proposed power demand.
+
+    Args:
+        mode: operation mode [0=cooling, 1=heating]
+        cooling_power: cooling input electrical power demand
+        heating_power: heating input electrical power demand
+        standby_power: standby power demand
+        ventilation_power: ventilation power demand 
+        proposed_status: proposed status
+
+    Returns:
+        proposed_demand: proposed electrical demand [W]
+    '''
+    if mode==0:
+        return (proposed_status*cooling_power) + standby_power + ventilation_power
+    elif mode==1:
+        return (proposed_status*heating_power) + standby_power + ventilation_power
+    
+    return 0
+
+def compute_actual_demand_tcl(proposed_demand, standby_power, ventilation_power, actual_status):
+    '''
+    Calculate the actual power demand.
+
+    Args:
+        mode: operation mode [0=cooling, 1=heating]
+        proposed_demand: proposed electrical demand [W]
+        standby_power: standby power demand
+        ventilation_power: ventilation power demand
+        actual_status: actual approved power demand
+
+    Returns:
+        actual power demand
+    
+    References:
+
+    '''
+    return (actual_status*proposed_demand) + standby_power + ventilation_power
+    
+
+def compute_power_thermal(mode, actual_demand, cop):
+    '''
+    Calculate the equivalent thermal power injected to or removed from the thermal zone
+
+    Args:
+        mode: operation mode [0=cooling, 1=heating]
+        actual_demand: actual electrical power demand
+        cop: coefficient of performance
+        actual_status: actual approved status
+
+    Returns:
+        power_thermal: equivalent thermal power
+    '''
+    if mode==0:
+        return actual_demand * cop * -1
+    elif mode==1:
+        return actual_demand * cop
+    
+    return 0
+
+
+def compute_flexibility_tcl(mode, temp_in, temp_min, temp_max):
+    '''
+    Calculate the flexibility of thermostat controlled device.
+
+    Args:
+        mode: operation mode [0=cooling, 1=heating]
+        temp_in: temperature inside the thermal zone
+        temp_min: minimum allowable temperature
+        temp_max: maximum allowable temperature
+
+    Returns:
+        flexibility: flexibility of the device
+    '''
+    if mode==0:
+        return (temp_max-temp_in) / (temp_max-temp_min)
+    elif mode==1:
+        return (temp_in-temp_min) / (temp_max-temp_min)
+    
+    return 0
+
+
+def device_tcl(states, common, inverter=False):
     # device model for vapor compresion cycle, e.g., freezer, fridge, air condition
     ''' 
-    Generic model of Battery-based loads
-    Inputs:
-        mode = cooling mode
-        temp_in = inside temperature
-        temp_min = minimum temperature allowed
-        temp_max = maximum temperature allowed
-        temp_target = target temperature for cooling
-        tolerance = setpoint tolerance
-        cooling_power = compressor power
-        cop = coefficient of performance
-        standby_power = power during standby mode
-        ventilation_power = power for fans
-        proposed_status = proposed status of the device before demand control
-        actual_status = status decided by the dongle, 1=job is start, 0=delayed 
-        tcl_control = control of TCLs, direct vs setpoint change
-    Outputs:
-        proposed_status = proposed status for the next timestep
-        flexibility = capability of the device to be delayed in starting
-        proposed_demand = proposed demand for the next timestep
-        actual_demand = actual demand based on the previous proposed_demand and previous actual_status
-        cooling_power_thermal = actual thermal power taken from the thermal zone
+    Generic model for thermostat-controlled loads
+    
+    Args:
+        states: dictionary containing state parameters of the device
+        common: dictionary containing common data and settings
+
+    Returns:
+        updated states
+
     '''
     try:
         ### calculate actual demand and actual thermal output
-        # NOTE: All cooling are compressor-based  
-        if tcl_control=='direct': ### if compressor can be controlled
-            actual_demand = np.multiply(np.add(np.add(np.multiply(cooling_power, actual_status), standby_power), 
-                ventilation_power), ((mode==0)*1))  
-            cooling_power_thermal = np.multiply(np.multiply(np.multiply(cooling_power, 
-                actual_status), cop), ((mode==0)*1)) * -1
-        else: ### if compressor can't be controlled
-            actual_demand = np.multiply(np.add(np.add(np.multiply(cooling_power, proposed_status), standby_power), 
-                ventilation_power), ((mode==0)*1))  
-            cooling_power_thermal = np.multiply(np.multiply(np.multiply(cooling_power, 
-                proposed_status), cop), ((mode==0)*1)) * -1
-        
+        states['actual_demand'] = compute_actual_demand_tcl(
+            states['proposed_demand'], 
+            states['standby_power'], 
+            states['ventilation_power'], 
+            states['actual_status'],
+            )
+
+        ### calculate actual thermal power injected or removed from the thermal zone
+        states['power_thermal'] = compute_power_thermal(
+                states['mode'], 
+                states['actual_demand'], 
+                states['cop'], 
+                )
+
         ### update proposed status and proposed demand
-        proposed_status = ((((temp_in>=np.subtract(temp_target, tolerance)) & (proposed_status==1)) 
-            | ((temp_in>=np.add(temp_target, tolerance))&(proposed_status==0)))&(mode==0)) * 1
-        proposed_demand = np.multiply(np.add(np.add(np.multiply(proposed_status, cooling_power), 
-            standby_power), ventilation_power), ((mode==0)*1))
+        states['proposed_status'] = compute_proposed_status_tcl(
+            states['mode'], 
+            states['proposed_status'], 
+            states['temp_in'], 
+            states['temp_target'], 
+            states['tolerance'],
+            )
+
+        states['proposed_demand'] = compute_proposed_demand_tcl(
+            states['mode'], 
+            states['cooling_power'], 
+            states['heating_power'], 
+            states['standby_power'], 
+            states['ventilation_power'], 
+            states['proposed_status'],
+            )
+
         ### update flexibility
-        flexible_horizon = np.subtract(temp_max, temp_in)
-        operation_horizon = np.subtract(temp_max, temp_min)
-        flexibility = np.divide(flexible_horizon, operation_horizon)
-        return {
-            'proposed_status': proposed_status,
-            'proposed_demand': proposed_demand, 
-            'flexibility': np.multiply(flexibility, ((mode==0)*1)),
-            'cooling_power_thermal': cooling_power_thermal, 
-            'actual_demand': np.abs(np.add(actual_demand, np.random.normal(0, 0.01)))}
+        states['flexibility'] = compute_flexibility_tcl(
+            states['mode'], 
+            states['temp_in'], 
+            states['temp_min'], 
+            states['temp_max'],
+            )
+        return 
     except Exception as e:
         print("Error MODELS.device_cooling_compression:{}".format(e))
         return {}
 
-def device_heating_compression(mode, temp_in, temp_min, temp_max, temp_target, 
-    tolerance, heating_power, cop, standby_power, ventilation_power, 
-    proposed_status, actual_status, tcl_control):
-    # device model for vapor compression cycle for heating, e.g., heatpump
-    '''
-    Inputs:
-        mode = cooling mode
-        temp_in = inside temperature
-        temp_min = minimum temperature allowed
-        temp_max = maximum temperature allowed
-        temp_target = target temperature for heating
-        tolerance = setpoint tolerance
-        heating_power = compressor power
-        cop = coefficient of performance
-        standby_power = power during standby mode
-        ventilation_power = power for fans
-        proposed_status = status without demand control
-        actual_status = status decided by the dongle, 1=job is start, 0=delayed 
-        tcl_control = control of TCLs, direct vs setpoint change   
-    Outputs:
-        proposed_status = proposed status for the next timestep
-        flexibility = capability of the device to be delayed in starting
-        proposed_demand = proposed demand for the next timestep
-        actual_demand = actual demand based on the previous proposed_demand and previous actual_status
-        cooling_power_thermal = actual thermal power taken from the thermal zone
-    '''
 
-    try:
-        ### update actual demand using actual_status, approved from previous step
-        if tcl_control=='direct': ## if compressor can be controlled
-            actual_demand = np.add(np.add(np.multiply(heating_power, actual_status), standby_power), 
-                ventilation_power)*((mode==1)*1) 
-            heating_power_thermal = np.multiply(np.multiply(np.multiply(heating_power, 
-                actual_status), cop), ((mode==1)*1))
-        else: ## if compressor can not be controlled
-            actual_demand = np.add(np.add(np.multiply(heating_power, proposed_status), standby_power), 
-                ventilation_power)*((mode==1)*1) 
-            heating_power_thermal = np.multiply(np.multiply(np.multiply(heating_power, 
-                proposed_status), cop), ((mode==1)*1))
+### Battery-based ###
+def compute_finish_battery(unixtime, target_soc, soc, capacity, proposed_demand):
+    '''
+    Predict finish time of charging.
 
-        ### update proposed status and proposed_demand
-        proposed_status = ((((temp_in<=np.add(temp_target, tolerance))&(proposed_status==1)) 
-            |  ((temp_in<=np.subtract(temp_target, tolerance))&(proposed_status==0)))&(mode==1)) * 1
-        proposed_demand = np.multiply(np.multiply(proposed_status, heating_power), ((mode==1)*1))
-        ### update flexibility
-        flexible_horizon = np.subtract(temp_in, temp_min)
-        operation_horizon = np.subtract(temp_max, temp_min)
-        flexibility = np.divide(flexible_horizon, operation_horizon)
+    Args:
+        unixtime: current timestamp
+        target_soc: target state of charge
+        soc: current state of charge
+        capacity: battery capacity [W*s]
+        proposed_demand: proposed power demand [W]
+
+    Returns:
+        predicted_finish: timestamp of forecasted finish
+    
+    References:
+
+    '''
+    return unixtime + (((target_soc-soc)*capacity)/proposed_demand)
+
+
+def compute_flexible_horizon(unixend, predicted_finish, connected):
+    '''
+    Calculate flexible horizon.
+
+    Args:
+        unixend: desired timestamp when SOC should reach the target level [timestamp]
+        predicted_finish: forecasted timestamp when target SOC is reached [timestamp]
+        connected: status of the device [0=unplugged, 1=connected]
+
+    Returns:
+        flexible_horizon: flexible time horizon [s]
+
+    References:
+
+    '''
+    return (unixend-predicted_finish)*connected
+
+
+def compute_operation_horizon(unixstart, unixend):
+    '''
+    Calculate operation time horizon
+
+    Args:
+        unixstart: start of charging or process [timestamp]
+        unixend: target end of charging or process [timestamp]
+
+    Returns:
+        operation_horizon
+
+    References:
+
+    '''
+    return unixend-unixstart
+
+
+
+
+
+# def compute_flexibility_battery(flexible_horizon, operation_horizon, connected):
+#     '''
+#     Calculate the device flexibility.
+
+#     Args:
+#         flexible_horizon: flexible part of operation horizon
+#         operation_horizon: total operation horizon
+#         connected: boolean if device is plugged in
         
-        
-        return {
-            'proposed_status': proposed_status,
-            'proposed_demand': proposed_demand,
-            'flexibility': np.multiply(flexibility, (mode==1)*1),
-            'heating_power_thermal': heating_power_thermal, 
-            'actual_demand': np.add(actual_demand, np.random.normal(1, 0.01, len(actual_demand)))}
-    except Exception as e:
-        print("Error MODELS.device_heating_compression:{}".format(e))
-        return {}
+#     Returns:
+#         flexibility: flexibility of the device
+
+#     References:
+
+#     '''
+#     if connected>0:
+#         return flexible_horizon/operation_horizon
+#     else:
+#         return 0
 
 
-
-
-def device_heatpump(mode, temp_in, temp_out, temp_min, temp_max, temp_target,
-    cooling_setpoint, heating_setpoint, tolerance, cooling_power, heating_power, cop, 
-    standby_power, ventilation_power, proposed_status, actual_status, tcl_control):
-    try:
-        ### determine mode
-        mode = ((np.subtract(temp_max, temp_in) > 0)&(heating_setpoint>temp_out)) * 1
-        ### set proposed demand
-        c = device_cooling_compression(mode=mode, temp_in=temp_in, temp_min=temp_min, 
-            temp_max=temp_max, temp_target=temp_target, tolerance=tolerance, 
-            cooling_power=cooling_power, cop=cop, standby_power=standby_power, 
-            ventilation_power=ventilation_power, proposed_status=proposed_status, 
-            actual_status=actual_status, tcl_control=tcl_control)
-
-        h = device_heating_compression(mode=mode, temp_in=temp_in, temp_min=temp_min, 
-            temp_max=temp_max, temp_target=temp_target, tolerance=tolerance, 
-            heating_power=heating_power, cop=cop, standby_power=standby_power, 
-            ventilation_power=ventilation_power, proposed_status=proposed_status, 
-            actual_status=actual_status, tcl_control=tcl_control)
-        return {
-            'mode': mode, 
-            'proposed_status': np.add(c['proposed_status'], h['proposed_status']),
-            'proposed_demand': np.add(c['proposed_demand'], h['proposed_demand']),
-            'flexibility': np.add(c['flexibility'], h['flexibility']),
-            'cooling_power_thermal': c['cooling_power_thermal'],
-            'heating_power_thermal': h['heating_power_thermal'],
-            'actual_demand': np.add(c['actual_demand'], h['actual_demand'])}
-    except Exception as e:
-        print("Error MODELS.device_tcl:{}".format(e))
-        return {}
-
-def device_heating_resistance(mode, temp_in, temp_min, temp_max, heating_setpoint, 
-    tolerance, heating_power, cop, standby_power, ventilation_power, 
-    proposed_status, actual_status, tcl_control):
-    # device model for resistance-based heating, e.g., heatpump
+def compute_adjusted_min_soc(min_soc, target_soc, unixtime, unixstart, unixend):
     '''
-    Inputs:
-        mode = cooling mode
-        temp_in = inside temperature
-        temp_min = minimum temperature allowed
-        temp_max = maximum temperature allowed
-        heating_setpoint = target temperature for heating
-        tolerance = setpoint tolerance
-        heating_power = power of heating element
-        cop = coefficient of performance
-        standby_power = power during standby mode
-        ventilation_power = power for fans
-        proposed_status = status proposed in previous timestep
-        actual_status = status decided by the dongle, 1=job is start, 0=delayed 
-        tcl_control = control of TCLs, direct vs setpoint change
-    Outputs:
-        proposed_status = proposed status for the next timestep
-        flexibility = capability of the device to be delayed in starting
-        proposed_demand = proposed demand for the next timestep
-        actual_demand = actual demand based on the previous proposed_demand and previous actual_status
-        cooling_power_thermal = actual thermal power taken from the thermal zone
+    Adjust minimum state of charge to consider charging schedule.
+
+    Args:
+        min_soc: minimum allowable state of charge
+        target_soc: target state of charge
+        unixtime: current timestamp
+        unixstart: earliest start timestamp
+        unixend: latest finish timestamp
+
+    Returns:
+        min_soc: adjusted min_soc
     '''
-    try:
-        if tcl_control=='direct': ### get actual_demand
-            actual_demand = np.add(np.add(np.multiply(actual_status, heating_power), standby_power), ventilation_power)*((mode==1)*1) 
-            heating_power_thermal = np.multiply(np.multiply(cop, np.multiply(heating_power, actual_status)), ((mode==1)*1))
-        elif tcl_control.startswith('setpoint'): ## change in demand is based on setpoint adjustment, 'setpoint'=use ON/OFF state, 'setpoint2'=use ldc signal, uniform adjustment to all
-            actual_demand = np.add(np.add(np.multiply(heating_power, proposed_status), standby_power), ventilation_power)*((mode==1)*1) 
-            heating_power_thermal = np.multiply(np.multiply(np.multiply(heating_power, proposed_status), cop), ((mode==1)*1))
+    if unixstart==0 or unixend==1:
+        adjusted_min_soc = min_soc
+    else:
+        adjusted_min_soc = min_soc + ((target_soc-min_soc) * ((unixtime-unixstart) / (unixend-unixstart)))
+    
+    if adjusted_min_soc>=target_soc:
+        return target_soc-0.1
+    elif min_soc>=adjusted_min_soc:
+        return min_soc
+    else:
+        return adjusted_min_soc
+
+
+def compute_flexibility_battery(soc, target_soc, min_soc, connected):
+    '''
+    Calculate device flexibility.
+    
+    Args:
+        soc: state of charge
+        target_soc: target state of charge
+        min_soc: minimum state of charge
+
+    Returns:
+        flexibility: flexibility of the device
+
+    '''
+    if connected>0:
+        return (soc-min_soc) / (target_soc-min_soc)
+    else:
+        return 0
+    
+
+def compute_proposed_demand_battery(charging_power, soc):
+    '''
+    Mathematical model of battery charger.
+    (charging_power / np.e**(((soc>=0.9)*1 *((soc*100)-90))))  # mathematical model
+
+    Args:
+        charging_power: rated charging power
+        soc: state of charge
+
+    Returns:
+        power_demand: power demand as a function of soc [W]
+
+    References:
+
+    '''
+    if soc>=0.9:
+        return charging_power * np.e**-((soc-0.9)*100)
+    else:
+        return charging_power
+
+
+def compute_proposed_status_battery(progress, connected):
+    '''
+    Determine the charger status.
+
+    Args:
+        progress: charging progress
+        connected: status of charger [0=unplugged, 1=plugged]
+
+    Returns:
+        status: status of charger [0,1]
+    
+    References:
+
+    '''
+    if progress<1 and connected>0:
+        return 1
+    else:
+        return 0
+    
+
+def compute_actual_demand_battery(proposed_demand, charging_power, priority, priority_offset, b2g, with_dr, connected):
+    '''
+    Calculate actual or approved power demand.
+
+    Args:
+        proposed_demand: proposed charging power [W]
+        charging_power: rating of the charger / inverter
+        priority: priority value of the device
+        priority_offset: offset of priority from ldc_signal
+        b2g: battery to grid capability [0,1]
+        with_dr: response capability [0,1]
+        connected: boolean if plugged in [0,1]
+    
+    Returns:
+        actual_demand: actual or approved power demand [W]
+    References:
+
+    '''
+    if with_dr==1:
+        if b2g==0 and priority_offset<0:
+            return 0
+        elif b2g==1 and priority_offset<0:
+            return -1 * charging_power * compute_normalize(abs(priority_offset), 0.0, priority, 0.0, 1.0) * connected
+        elif priority>=0:
+            return proposed_demand * (compute_normalize(priority_offset, 0.0, 100-priority, 0.0, 1.0)) * connected
         else:
-            actual_demand = np.add(np.add(np.multiply(actual_status, heating_power), standby_power), ventilation_power)*((mode==1)*1) 
-            heating_power_thermal = np.multiply(np.multiply(cop, np.multiply(heating_power, actual_status)), ((mode==1)*1))
-
-        ### update proposed_status and proposed_demand
-        proposed_status = ((((temp_in<=np.add(heating_setpoint, tolerance))&(proposed_status==1)) 
-            |  ((temp_in<=np.subtract(heating_setpoint, tolerance))&(proposed_status==0)))&(mode==1)) * 1
-        proposed_demand = np.multiply(np.multiply(proposed_status, heating_power), ((mode==1)*1))
-        ### update flexibility
-        flexible_horizon = np.subtract(temp_in, temp_min)
-        operation_horizon = np.subtract(temp_max, temp_min)
-        flexibility = np.divide(flexible_horizon, operation_horizon)
-        
-        return {
-            'proposed_status': proposed_status,
-            'proposed_demand': proposed_demand,
-            'flexibility': flexibility,
-            'heating_power_thermal': heating_power_thermal, 
-            'actual_demand': np.add(actual_demand, np.random.normal(1, 0.01, len(actual_demand)))}
-    except Exception as e:
-        print("Error MODELS.device_heating_resistance:{}".format(e))
-        return {}
-
-
+            demand = proposed_demand * (compute_normalize(priority_offset, 0.0, 100-abs(priority), 0.0, 1.0)) * connected
+            demand += proposed_demand * abs(priority)*1e-2 * connected
+            if demand>=proposed_demand:
+                return proposed_demand
+            else:
+                return demand
+    else:
+        return proposed_demand * connected
         
 
-def device_battery(unixtime, unixstart, unixend, soc, charging_power, target_soc, capacity,
-    connected, progress, actual_status, proposed_demand):
+def device_battery(states):
     ''' 
-    Generic model of Battery-based loads
-    Inputs:
-        unixtime = current timestamp
-        unixstart = earliest timestamp to start the device
-        unixend = latest timestamp to finish the job
-        connected = signifies if the device is connected, i.e., unixstart <= unixtime < unixend
-        progress = status of the job, i.e., range 0..1, 
-        actual_status = approved status, 1=job is start, 0=delayed
-        proposed_demand = proposed demand for the next time step
-    Outputs:
-        proposed_status = proposed status for the next timestep
-        flexibility = capability of the device to be delayed in starting
-        priority = priority of the device based on its flexibility, 
-                            used as decision variable for the ldc_dongles
-        proposed_demand = proposed demand for the next timestep
-        actual_demand = actual demand based on the previous proposed_demand and previous actual_status
+    Generic model of Battery-based loads.
+    
+    Args:
+        states: dictionary containing the state of the device
+        
+    Returns:
+        updated dictionary
     '''
     ### calculate actual_demand based on approved status and proposed demand from previous step
-    actual_demand = np.multiply(np.multiply(actual_status, proposed_demand), (progress<1)*1)
-    ### update proposed_status and proposed_demand for next step
-    proposed_status = ((progress<1)&(connected>0))*1
-    proposed_demand = np.divide(charging_power, np.e**(np.multiply((soc>=0.9)*1, 
-        np.subtract(np.multiply(soc, 100), 90))))  # mathematical model
-    ### predict finish and calculate flexibility based on newly proposed demand
-    predicted_finish = np.add(unixtime, np.divide(np.multiply(np.subtract(target_soc, 
-        soc), capacity), proposed_demand))
+    states['actual_demand'] = compute_actual_demand_battery(
+        states['proposed_demand'], 
+        states['charging_power'],
+        states['priority'],
+        states['priority_offset'], 
+        states['b2g'],
+        states['with_dr'],
+        states['connected'],
+        )
 
-    flexible_horizon = np.multiply(np.subtract(unixend, predicted_finish), connected)
-    operation_horizon = np.abs(np.subtract(unixend, unixstart))
-    flexibility = np.divide(flexible_horizon, operation_horizon)
+    ### update proposed_status and proposed_demand for next step
+    states['proposed_status'] = compute_proposed_status_battery(
+        states['progress'], 
+        states['connected'])
+
+    ### mathematical model
+    states['proposed_demand'] = compute_proposed_demand_battery(
+        states['charging_power'], 
+        states['soc']) 
+
+    ### predict finish and calculate flexibility based on newly proposed demand
+    # states['predicted_finish'] = compute_finish_battery(
+    #     states['unixtime'], 
+    #     states['target_soc'], 
+    #     states['soc'], 
+    #     states['capacity'], 
+    #     states['proposed_demand'],
+    #     )
+    # states['flexible_horizon'] = compute_flexible_horizon(
+    #     states['unixend'], 
+    #     states['predicted_finish'], 
+    #     states['connected'],
+    #     )
+    # states['operation_horizon'] = compute_operation_horizon(
+    #     states['unixstart'], 
+    #     states['unixend'],
+    #     )
+    # states['flexibility'] = compute_flexibility_battery(
+    #     states['flexible_horizon'],
+    #     states['operation_horizon'],
+    #     )
+
+    if 'ev' in states['load_type']:
+        states['flexibility'] = compute_flexibility_battery(
+            states['soc'], 
+            states['target_soc'], 
+            compute_adjusted_min_soc(
+                states['min_soc'],
+                states['target_soc'],
+                states['unixtime'],
+                states['unixstart'],
+                states['unixend'],
+                ),
+            states['connected'],
+            )
+            
+    else:
+        states['flexibility'] = compute_flexibility_battery(
+            states['soc'], 
+            states['target_soc'], 
+            states['min_soc'],
+            states['connected'],
+            )
     
-    return {
-        'proposed_status': proposed_status.flatten(), 
-        'flexibility': flexibility.flatten(), 
-        'predicted_finish': predicted_finish.flatten(), 
-        'proposed_demand': proposed_demand.flatten(), 
-        'actual_demand': actual_demand.flatten()}
+
+    return states
         
 
 
 
-def device_charger_ev(unixtime, unixstart, unixend, soc, charging_power, target_soc, capacity,
-    connected, progress, actual_status, proposed_demand):
+# def device_charger_ev(unixtime, unixstart, unixend, soc, charging_power, target_soc, capacity,
+#     connected, progress, actual_status, proposed_demand):
+#     '''
+#     Input states:
+#         Model for EV charger
+#         unixtime = current timestamp
+#         unixstart = timestamp for earliest start
+#         unixend = timestamp for latest end
+#         soc = state of charge [ratio]
+#         charging_power = charger power rating [w]
+#         target_soc = user-defined target soc [ratio]
+#         capacity = storage capacity [J or watt*s]
+#         connected = charger is connected to socket
+#         progress = charging progress
+#         actual_status = approved status by the dongle
+#         proposed_demand = proposed demand from previous step
+#     Output actions:
+#         proposed_status = proposed status
+#         flexibility = ldc flexibility
+#         priority = ldc priority
+#         predicted_finish = predicted time of finish
+#         proposed_demand = proposed demand
+#         actual_demand = actual demand
+
+#     Charging time for 100 km of BEV range   Power supply    power   Voltage     Max. current
+#     6–8 hours                               Single phase    3.3 kW  230 V AC        16 A
+#     3–4 hours                               Single phase    7.4 kW  230 V AC        32 A
+#     2–3 hours                               Three phase     11 kW   400 V AC        16 A
+#     1–2 hours                               Three phase     22 kW   400 V AC        32 A
+#     20–30 minutes                           Three phase     43 kW   400 V AC        63 A
+#     20–30 minutes                           Direct current  50 kW   400–500 V DC    100–125 A
+#     10 minutes                              Direct current  120 kW  300–500 V DC    300–350 A
+#     '''
+#     ### calculate actual_demand based on approved status and proposed demand from previous step
+#     actual_demand = np.multiply(np.multiply(actual_status, proposed_demand), (progress<1)*1)
+#     ### update proposed_status and proposed_demand for next step
+#     proposed_status = ((unixstart<=unixtime) & (unixend>=unixtime)) * 1
+#     ### get proposed_demand
+#     # proposed_demand = np.divide(charging_power, np.e**(np.multiply((soc>=0.9)*1, 
+#     #   np.subtract(np.multiply(soc, 100), 90))))  # mathematical model
+#     proposed_demand = proposed_demand  # model based on actual data from pecan street
+#     ### predict finish and calculate flexibility based on newly proposed demand
+#     predicted_finish = np.add(unixtime, np.divide(np.multiply(np.subtract(target_soc, 
+#         soc), capacity), proposed_demand))
+#     flexible_horizon = np.multiply(np.subtract(unixend, predicted_finish), connected)
+#     operation_horizon = np.abs(np.subtract(unixend, unixstart))
+#     flexibility = np.divide(flexible_horizon, operation_horizon)
+    
+#     return {'proposed_status': proposed_status.flatten(), 
+#         'flexibility': flexibility.flatten(), 
+#         'predicted_finish': predicted_finish.flatten(), 
+#         'proposed_demand': proposed_demand.flatten(), 
+#         'actual_demand': actual_demand.flatten()}
+
+
+# def device_charger_storage(unixtime, unixstart, unixend, soc, charging_power, target_soc, capacity,
+#     connected, progress, actual_status, proposed_demand):
+#     '''
+#     Input states:
+#         Model for battery charger
+#         unixtime = current timestamp
+#         unixstart = timestamp for earliest start
+#         unixend = timestamp for latest end
+#         soc = state of charge [ratio]
+#         charging_power = charger power rating [w]
+#         target_soc = user-defined target soc [ratio]
+#         capacity = storage capacity [J or watt*s]
+#         connected = charger is connected to socket
+#         progress = charging progress
+#         actual_status = approved status by the dongle
+#         proposed_demand = proposed demand from previous step
+#     Output actions:
+#         proposed_status = proposed status
+#         flexibility = ldc flexibility
+#         priority = ldc priority
+#         predicted_finish = predicted time of finish
+#         proposed_demand = proposed demand
+#         actual_demand = actual demand
+#     '''
+#     ### calculate actual_demand based on approved status and proposed demand from previous step
+#     actual_demand = np.multiply(np.multiply(actual_status, proposed_demand), (progress<1)*1)
+    
+#     ### update proposed_status and proposed_demand for next step
+#     proposed_status = ((progress<1)&(connected>0))*1
+#     proposed_demand = np.divide(charging_power, np.e**(np.multiply((soc>=0.9)*1, 
+#         np.subtract(np.multiply(soc, 100), 90))))  # mathematical model
+#     ### predict finish
+#     predicted_finish = np.add(unixtime, np.divide(np.multiply(np.subtract(target_soc, 
+#         soc), capacity), proposed_demand))
+#     ### predict finish and calculate flexibility based on newly proposed demand
+#     predicted_finish = np.add(unixtime, np.divide(np.multiply(np.subtract(target_soc, 
+#         soc), capacity), proposed_demand))
+#     flexible_horizon = np.multiply(np.subtract(unixend, predicted_finish), connected)
+#     operation_horizon = np.abs(np.subtract(unixend, unixstart))
+#     flexibility = np.divide(flexible_horizon, operation_horizon)
+    
+#     return {'proposed_status': proposed_status.flatten(), 
+#         'flexibility': flexibility.flatten(), 
+#         'predicted_finish': predicted_finish.flatten(), 
+#         'proposed_demand': proposed_demand.flatten(), 
+#         'actual_demand': actual_demand.flatten()}
+    
+    
+
+### NTCL ###
+def compute_actual_demand_ntcl(proposed_demand, actual_status):
     '''
-    Input states:
-        Model for EV charger
-        unixtime = current timestamp
-        unixstart = timestamp for earliest start
-        unixend = timestamp for latest end
-        soc = state of charge [ratio]
-        charging_power = charger power rating [w]
-        target_soc = user-defined target soc [ratio]
-        capacity = storage capacity [J or watt*s]
-        connected = charger is connected to socket
-        progress = charging progress
-        actual_status = approved status by the dongle
-        proposed_demand = proposed demand from previous step
-    Output actions:
-        proposed_status = proposed status
-        flexibility = ldc flexibility
-        priority = ldc priority
-        predicted_finish = predicted time of finish
-        proposed_demand = proposed demand
-        actual_demand = actual demand
+    Calculate actual demand of NTCL.
 
-    Charging time for 100 km of BEV range   Power supply    power   Voltage     Max. current
-    6–8 hours                               Single phase    3.3 kW  230 V AC        16 A
-    3–4 hours                               Single phase    7.4 kW  230 V AC        32 A
-    2–3 hours                               Three phase     11 kW   400 V AC        16 A
-    1–2 hours                               Three phase     22 kW   400 V AC        32 A
-    20–30 minutes                           Three phase     43 kW   400 V AC        63 A
-    20–30 minutes                           Direct current  50 kW   400–500 V DC    100–125 A
-    10 minutes                              Direct current  120 kW  300–500 V DC    300–350 A
+    Args:
+        proposed_demand: proposed power demand
+        actual_status: actual or approved status
+    
+    Returns:
+        actual_demand: approved demand
     '''
-    ### calculate actual_demand based on approved status and proposed demand from previous step
-    actual_demand = np.multiply(np.multiply(actual_status, proposed_demand), (progress<1)*1)
-    ### update proposed_status and proposed_demand for next step
-    proposed_status = ((unixstart<=unixtime) & (unixend>=unixtime)) * 1
-    ### get proposed_demand
-    # proposed_demand = np.divide(charging_power, np.e**(np.multiply((soc>=0.9)*1, 
-    #   np.subtract(np.multiply(soc, 100), 90))))  # mathematical model
-    proposed_demand = proposed_demand  # model based on actual data from pecan street
-    ### predict finish and calculate flexibility based on newly proposed demand
-    predicted_finish = np.add(unixtime, np.divide(np.multiply(np.subtract(target_soc, 
-        soc), capacity), proposed_demand))
-    flexible_horizon = np.multiply(np.subtract(unixend, predicted_finish), connected)
-    operation_horizon = np.abs(np.subtract(unixend, unixstart))
-    flexibility = np.divide(flexible_horizon, operation_horizon)
-    
-    return {'proposed_status': proposed_status.flatten(), 
-        'flexibility': flexibility.flatten(), 
-        'predicted_finish': predicted_finish.flatten(), 
-        'proposed_demand': proposed_demand.flatten(), 
-        'actual_demand': actual_demand.flatten()}
+    return proposed_demand * actual_status
 
 
-def device_charger_storage(unixtime, unixstart, unixend, soc, charging_power, target_soc, capacity,
-    connected, progress, actual_status, proposed_demand):
+def compute_proposed_status_ntcl(progress, connected):
     '''
-    Input states:
-        Model for battery charger
-        unixtime = current timestamp
-        unixstart = timestamp for earliest start
-        unixend = timestamp for latest end
-        soc = state of charge [ratio]
-        charging_power = charger power rating [w]
-        target_soc = user-defined target soc [ratio]
-        capacity = storage capacity [J or watt*s]
-        connected = charger is connected to socket
-        progress = charging progress
-        actual_status = approved status by the dongle
-        proposed_demand = proposed demand from previous step
-    Output actions:
-        proposed_status = proposed status
-        flexibility = ldc flexibility
-        priority = ldc priority
-        predicted_finish = predicted time of finish
-        proposed_demand = proposed demand
-        actual_demand = actual demand
+    Determine the status of the non-urgent non-TCL device.
+
+    Args:
+        progress: job progress
+        connected: status if device is plugged in or job is pending.
+
+    Returns:
+        proposed_status: proposed status for the next timestep
     '''
-    ### calculate actual_demand based on approved status and proposed demand from previous step
-    actual_demand = np.multiply(np.multiply(actual_status, proposed_demand), (progress<1)*1)
-    
-    ### update proposed_status and proposed_demand for next step
-    proposed_status = ((progress<1)&(connected>0))*1
-    proposed_demand = np.divide(charging_power, np.e**(np.multiply((soc>=0.9)*1, 
-        np.subtract(np.multiply(soc, 100), 90))))  # mathematical model
-    ### predict finish
-    predicted_finish = np.add(unixtime, np.divide(np.multiply(np.subtract(target_soc, 
-        soc), capacity), proposed_demand))
-    ### predict finish and calculate flexibility based on newly proposed demand
-    predicted_finish = np.add(unixtime, np.divide(np.multiply(np.subtract(target_soc, 
-        soc), capacity), proposed_demand))
-    flexible_horizon = np.multiply(np.subtract(unixend, predicted_finish), connected)
-    operation_horizon = np.abs(np.subtract(unixend, unixstart))
-    flexibility = np.divide(flexible_horizon, operation_horizon)
-    
-    return {'proposed_status': proposed_status.flatten(), 
-        'flexibility': flexibility.flatten(), 
-        'predicted_finish': predicted_finish.flatten(), 
-        'proposed_demand': proposed_demand.flatten(), 
-        'actual_demand': actual_demand.flatten()}
-    
+    if connected==1 and progress<1.0:
+        return 1
+    return 0
     
 
+def compute_finish_ntcl(unixtime, progress, len_profile):
+    '''
+    Predict the expected finish time.
 
-def device_ntcl(len_profile, unixtime, unixstart, unixend, connected, progress, 
-    actual_status, proposed_demand):
+    Args:
+        unixtime: current timestamp
+        progress: progress of the NTCL job
+        len_profile: duration of the profile of the NTCL
+
+    Returns:
+        predicted_finish
+    '''
+    return unixtime + ((1-progress)*len_profile)
+    
+
+def compute_flexibility_ntcl(unixstart, unixend, predicted_finish, len_profile):
+    '''
+    Calculate the flexibility of the non-urgent non-thermostat-controlled loads.
+
+    Args:
+        unixstart: earliest start
+        unixend: latest finish
+        predicted_finish: predicted finish time
+        len_profile: duration of the profile
+
+    Returns:
+        flexibility: flexibility of the device
+    '''
+    return (unixend-predicted_finish) / (unixend-(unixstart+len_profile))
+
+
+def device_ntcl(states, dict_data):
     ''' 
-    Generic model of Non-TCL loads that are based on a power profile
-    Inputs:
-        len_profile = length of the load profile in seconds
-        unixtime = current timestamp
-        unixstart = earliest timestamp to start the device
-        unixend = latest timestamp to finish the job
-        connected = signifies if the device is connected, i.e., unixstart <= unixtime < unixend
-        progress = status of the job, i.e., range 0..1, 
-        actual_status = approved status, 1=job is start, 0=delayed
-        proposed_demand = proposed demand based on current progress and profile
-    Outputs:
-        proposed_status = proposed status for the next timestep
-        flexibility = capability of the device to be delayed in starting
-        priority = priority of the device based on its flexibility, used as decision variable for the ldc_dongles
-        proposed_demand = proposed demand for the next timestep
-        actual_demand = actual demand based on the previous proposed_demand and previous actual_status
+    Generic model of Enduse of non-urgent non-thermostat controlled loads.
+    
+    Args:
+        states: dictionary containing the state of the device
+        dict_data: dictionary containing the representative profiles for the device
+
+    Returns:
+        updated dictionary
     '''
-    try:
-        ### update proposed status and proposed_demand
-        proposed_status = ((progress<1)&(connected>0))*1
-        ### update flexibility 
-        predicted_finish = np.add(np.multiply(np.subtract(np.ones(progress.shape), progress), len_profile), unixtime)
-        flexible_horizon = np.multiply(np.subtract(unixend, predicted_finish), connected)
-        operation_horizon = np.abs(np.subtract(unixend, unixstart))
-        flexibility = np.divide(flexible_horizon, operation_horizon)
-        ### get actual demand
-        actual_demand = np.multiply(np.multiply(actual_status, proposed_demand), (progress<1)*1)
+    ### calculate actual_demand based on approved status and proposed demand from previous step
+    states['actual_demand'] = compute_actual_demand_ntcl(
+        states['proposed_demand'], 
+        states['actual_status'], 
+        )
+
+    ### update proposed_status and proposed_demand for next step
+    states['proposed_status'] = compute_proposed_status_ntcl(
+        states['progress'], 
+        states['connected'],
+        )
+
+    ### mathematical model
+    # states['proposed_demand'] = compute_proposed_demand_ntcl(
+    #     states['charging_power'], 
+    #     states['soc'])
+
+    # states['proposed_demand'] = np.array([np.interp(x*y, np.arange(y), dict_data[k]) for k, x, y in zip(states['profile'], states['len_profile'], states['progress'])]).flatten()
+    states['proposed_demand'] = np.array([dict_data[k][int((x*y)%x)] for k, x, y in zip(
+        states['profile'], 
+        states['len_profile'], 
+        states['progress'])]).flatten()
+
+    ### predict finish and calculate flexibility based on newly proposed demand
+    states['predicted_finish'] = compute_finish_ntcl(
+        states['unixtime'], 
+        states['progress'], 
+        states['len_profile'],
+        )
+
+    ### get flexibility
+    states['flexibility'] = compute_flexibility_ntcl(
+        states['unixstart'],
+        states['unixend'],
+        states['predicted_finish'],
+        states['len_profile'],
+        )
+    
+    return states
+
+
+# def device_ntcl(states):
+#     ''' 
+#     Generic model of Non-TCL loads that are based on a power profile
+#     Args:
+#         states: device state parameters
+
+#     Returns:
+#         states: updated states
+#     '''
+#     try:
+#         ### update proposed status and proposed_demand
+#         states['proposed_status'] = (states['(progress']<1)&(states['connected']>0))*1
+#         ### update flexibility 
+#         states['predicted_finish'] = np.add(np.multiply(np.subtract(np.ones(states['progress'].shape), progress), len_profile), unixtime)
+#         flexible_horizon = np.multiply(np.subtract(unixend, predicted_finish), connected)
+#         operation_horizon = np.abs(np.subtract(unixend, unixstart))
+#         flexibility = np.divide(flexible_horizon, operation_horizon)
+#         ### get actual demand
+#         actual_demand = np.multiply(np.multiply(actual_status, proposed_demand), (progress<1)*1)
         
         
-        return {
-            'proposed_status': proposed_status, 
-            'flexibility': flexibility, 
-            'proposed_demand': proposed_demand, 
-            'actual_demand': actual_demand}
-            # proposed_status, flexibility, priority, proposed_demand, actual_demand 
-            #(NOTE: actual_demand uses the proposed_demand and actual_status of the previous timestep)
-    except Exception as e:
-        print("Error MODELS.device_ntcl:",e)
-        return {}
+#         return {
+#             'proposed_status': proposed_status, 
+#             'flexibility': flexibility, 
+#             'proposed_demand': proposed_demand, 
+#             'actual_demand': actual_demand}
+#             # proposed_status, flexibility, priority, proposed_demand, actual_demand 
+#             #(NOTE: actual_demand uses the proposed_demand and actual_status of the previous timestep)
+#     except Exception as e:
+#         print("Error MODELS.device_ntcl:",e)
+#         return {}
 
 
 
@@ -1306,10 +1617,13 @@ def ldc_injector(ldc_signal, latest, target, step_size, algorithm, hour=0, minut
         # Ki = Kp/Ti
         # Kd = Kp*Td
         
-        Kp, Ki, Kd = abb_itae(1, K, 1, 'PID')
+        
 
         error = np.subtract(target, latest) #np.divide(np.subtract(target_loading, latest_loading), target_loading)
         derivative, max_d, min_d  = median_filter(error, previous_error, step_size, max_d, min_d)
+
+        K = K + abs(derivative)
+        Kp, Ki, Kd = abb_itae(1, K, 1, 'PID')
 
         p_term = np.multiply(Kp, error)
         i_term = np.clip(np.add(previous_i_term, np.multiply(error, step_size)), a_min=0, a_max=100/Ki) #np.add(signal, np.multiply(Ki, np.multiply(error, step_size)))
@@ -1407,21 +1721,42 @@ def ripple_signal(algorithm, hour, minute):
     return np.clip(signal, a_min=0, a_max=100)    
 
 
-def read_signal(old_signal, new_signal, n_units, resolution=1, delay=0.0, step_size=1, simulation=0):
-    '''Randomly update ldc_signal'''
-    try:
-        delta_signal = np.subtract(new_signal, old_signal)
-        delay = np.random.normal(delay, 10e-3, n_units)
-        delayed_signal = np.clip(np.subtract(new_signal, np.multiply(delay, np.divide(delta_signal, step_size))), a_min=0, a_max=100)
-        # print(new_signal, old_signal, delayed_signal[0])
-        # idx = np.flatnonzero(ldc_signal!=new_signal)
-        # w_new = np.clip(np.random.normal(0.99, 0.001, len(idx)), a_min=0.9, a_max=1.0)  # update the signal based on weights to avoid transient noise
-        # w_old = np.subtract(1, w_new)
-        # ldc_signal[idx] = np.add(np.multiply(ldc_signal[idx], w_old), np.multiply(w_new, np.round(new_signal, resolution)))
-        return {'ldc_signal':np.round(delayed_signal, resolution), 'old_signal':new_signal}  
-    except Exception as e:
-        print(f"Error MODELS.read_signal:{e}")
-        return {}
+def read_signal(old_signal, new_signal, resolution, delay, step_size, simulation):
+    '''
+    Emulate ldc_signal recovery including latency.
+
+    Args:
+        old_signal: ldc_signal in the previous step
+        new_signal: ldc_signal sent from the signal injector
+        resolution: number of decimal places for rounding the ldc_signal
+        delay: emulated latency delay [s]
+        step_size: time step of the simulation [s]
+        simulation: status of the program run [0=real, 1=simulation]
+
+    Returns:
+        ldc_signal: updated ldc_signal
+
+    References:
+
+    '''
+    if simulation==1:
+        return new_signal - (delay*((new_signal-old_signal)/step_size))
+    else:
+        return new_signal
+
+    # try:
+    #     delta_signal = np.subtract(new_signal, old_signal)
+    #     delay = np.random.normal(delay, 10e-3, n_units)
+    #     delayed_signal = np.clip(np.subtract(new_signal, np.multiply(delay, np.divide(delta_signal, step_size))), a_min=0, a_max=100)
+    #     # print(new_signal, old_signal, delayed_signal[0])
+    #     # idx = np.flatnonzero(ldc_signal!=new_signal)
+    #     # w_new = np.clip(np.random.normal(0.99, 0.001, len(idx)), a_min=0.9, a_max=1.0)  # update the signal based on weights to avoid transient noise
+    #     # w_old = np.subtract(1, w_new)
+    #     # ldc_signal[idx] = np.add(np.multiply(ldc_signal[idx], w_old), np.multiply(w_new, np.round(new_signal, resolution)))
+    #     return {'ldc_signal': np.round(delayed_signal, resolution), 'old_signal':new_signal}  
+    # except Exception as e:
+    #     print(f"Error MODELS.read_signal:{e}")
+    #     return {}
     
 
 
@@ -1467,6 +1802,28 @@ def normalize(value, a_min=20, a_max=80, x_max=100, x_min=0):
     return np.add(a_min, np.multiply(np.divide((value - x_min), (x_max - x_min)), 
                  np.subtract(a_max, a_min)))
 
+def compute_normalize(value, in_min, in_max, out_min, out_max):
+    '''
+    Normalize value within the range [out_min, out_max].
+
+    Args:
+        value: the value to be normalized
+        in_min: expected minimum input
+        in_max: expected maximum input
+        out_min: output minimum
+        out_max: output maximum
+    
+    Returns:
+        normalized_value
+    '''
+    if value>=in_max:
+        in_max = value
+    if value<=in_min:
+        in_min = value
+
+    return out_min + (((value - in_min) / (in_max - in_min))*(out_max-out_min))
+
+
 def spread(priority):
     for i in range(20, 90, 5):
         idx = np.flatnonzero((priority>=i)&(priority<i+5))
@@ -1481,6 +1838,122 @@ def sigmoid(x):
 def swap_priority(priority):
     return np.subtract(100, priority)
 
+def compute_min_cycletime(priority, ldc_signal):
+    # min_cycletime = abs(ldc_signal-priority)
+    # if min_cycletime<10:
+    #     return min_cycletime * 10
+    return ldc_signal
+
+    
+    
+    
+def compute_counter_offset(counter, min_cycletime):
+    return counter-min_cycletime
+
+def compute_revised_status(mode, proposed_status, temp_in, temp_target, tolerance):
+    '''
+    Revise the proposed status to avoid reaching the thermostat boundaries which causes the control lock-out.
+
+    Args:
+        mode: operation mode [0,1]
+        proposed_status: proposed status of the device [0, 1]
+        temp_in: inside temperature
+        temp_target: target setpoint of the inside temperature
+        tolerance: tolerance deviation from the target setpoint
+    
+    Returns:
+        revised_status: revised form of the proposed status
+
+    References:
+
+    '''
+    if (mode==0 and proposed_status==1 and temp_in<=(temp_target-(tolerance*0.9))) \
+        or (mode==1 and proposed_status==1 and temp_in>=(temp_target+(tolerance*0.9))):
+        return 0  # turn off to avoid reaching the thermostat boundary and cause lockout
+    else:
+        return proposed_status
+
+
+def compute_priority_offset(priority, ldc_signal):
+    '''
+    Calculate the norm distance of the priority from the ldc_signal
+
+    Args:
+        priority: device priority value
+        ldc_signal: command signal from the LDC injector
+
+    Returns:
+        priority_offset: difference between the ldc_signal and the priority value
+
+    '''
+    return ldc_signal - priority
+
+def compute_actual_status(with_dr, proposed_status, priority_offset, flexibility, min_cycletime, counter):
+    '''
+    Decide if proposed status should be approved.
+
+    Args:
+        with_dr: boolean if device is LDC enabled [0,1]
+        proposed_status: proposed device status for the next time step
+        priority_offset: difference between ldc_signal and priority value
+        flexibility: flexibility of the device
+        min_cycletime: threshold of the counter before the device status can be interrupted
+        counter: internal operation counter
+
+    Returns:
+        actual_status: actual or approved status
+
+    References:
+
+    '''
+    if with_dr==0 or counter<min_cycletime:
+        return proposed_status
+    elif priority_offset>=0 or flexibility<=0:
+        return proposed_status
+    else:
+        return 0
+
+def compute_changed_status(old_status, new_status, counter, min_cycletime):
+    '''
+    Implement actual status if counter is beyond minimum_cycletime.
+
+    Args:
+        old_status: status in previous time step
+        new_status: status in the nex time step
+        counter: internal device counter
+        min_cycletime: minimum time before  status change is allowed
+    
+    Returns:
+        actual_status: actual or approved status for implementation
+    '''
+    if counter>=2+(min_cycletime*0.1):
+        return new_status
+    else:
+        return old_status
+    
+
+def compute_counter(old_status, new_status, counter, step_size):
+    '''
+    Update counter.
+
+    Args:
+        old_status: device status in the previous time step
+        new_status: device status for the next time step
+        counter: current count value
+        step_size: time step increment
+
+    Returns:
+        counter: updated value of the counter
+    
+    References:
+
+    '''
+    if old_status!=new_status:
+        return 0
+    else:
+        return counter + step_size
+
+
 def ldc_dongle(states, common):
     '''
     MOdel for the LDC dongle controllers
@@ -1491,128 +1964,186 @@ def ldc_dongle(states, common):
         dict of priority and actual_status
     '''   
     try:
-        dict_signal = read_signal(old_signal=states['old_signal'], 
-                    new_signal=common['ldc_signal'],
-                    resolution=common['resolution'], 
-                    n_units=len(states['load_type']),
-                    delay=common['delay'], 
-                    step_size=common['step_size'],
-                    simulation=common['simulation'])
-
-        ldc_signal = dict_signal['ldc_signal']  ## delayed_signal
-
-        actions = {}
-        proposed_status = states['proposed_status']
-        cdiv = 1
+        ldc_signal = read_signal(
+                        states['old_signal'], 
+                        np.ones(states['ldc_signal'].size)*common['ldc_signal'],
+                        np.ones(states['ldc_signal'].size)*common['resolution'],
+                        np.ones(states['ldc_signal'].size)*common['delay'], 
+                        np.ones(states['ldc_signal'].size)*common['step_size'],
+                        np.ones(states['ldc_signal'].size)*common['simulation'],
+                        )
+        
+        states['old_signal'] = np.ones(states['ldc_signal'].size)*common['ldc_signal']
+        states['ldc_signal'] = ldc_signal
+        states['step_size'] = np.ones(states['ldc_signal'].size)*common['step_size']
+        old_status = states['actual_status']
+        
         ### update priority and actual_status
         if common['algorithm']=='no_ldc':
-            priority = states['priority'] * 0
-            actual_status = np.multiply(states['proposed_status'], ((states['priority']<=ldc_signal)|np.invert(states['with_dr']))*1)
+            states['priority'] = states['priority'] * 0
+            states['actual_status'] = states['proposed_status']
+            
         elif common['algorithm'] in ['basic_ldc', 'advanced_ldc']:
-            ### change proposed_status to avoid thermostat lock out
-            if (states['load_type'][0] in ['heater', 'waterheater']): ### change the proposed status to avoid thermostat lock up
-                ### virtual thermostat, has lockout based on deadband and f_reduce
-                # if states['load_type'][0]=='waterheater':
-                #     f_reduce = 1
-                # else:
-                #     f_reduce = 1
-                # revised_cooling = ((((states['temp_in']>=np.subtract(states['temp_target'], np.multiply(states['tolerance'], 0.8))) & (states['actual_status']==1)) 
-                #                             | ((states['temp_in']>=np.add(states['temp_target'], np.multiply(states['tolerance'], f_reduce)))&(states['actual_status']==0)))&(states['mode']==0)) * 1
-                # revised_heating = ((((states['temp_in']<=np.add(states['temp_target'], np.multiply(states['tolerance'], 0.8)))&(states['actual_status']==1)) 
-                #                             |  ((states['temp_in']<=np.subtract(states['temp_target'], np.multiply(states['tolerance'], f_reduce)))&(states['actual_status']==0)))&(states['mode']==1)) * 1
-                
-                ### virtual relay, no lockout
-                revised_cooling = ((((states['temp_in']>=np.subtract(states['temp_target'], np.multiply(states['tolerance'], 0.9))) & (states['proposed_status']==1)))&(states['mode']==0)) * 1
-                revised_heating = ((((states['temp_in']<=np.add(states['temp_target'], np.multiply(states['tolerance'], 0.9)))&(states['proposed_status']==1)))&(states['mode']==1)) * 1
-                
-                revised_status = np.add(revised_cooling, revised_heating)
-                proposed_status = np.multiply(states['proposed_status'], revised_status)
-
+            ### change priority
             if common['algorithm']=='basic_ldc':
-                ### change priority
                 if (common['ranking']=='dynamic')&(common['unixtime']%60<1): 
-                    priority = np.random.uniform(20,80,len(states['priority'])) # change every 60 seconds
+                    states['priority'] = np.random.uniform(0,100,len(states['priority'])) # change every 60 seconds
                 elif (common['ranking']=='evolve')&(common['unixtime']%60<1):
-                    priority = np.add(np.remainder(np.add(states['priority'], 1), 60), 20)
+                    states['priority'] = np.add(np.remainder(np.add(states['priority'], 1), 60), 20)
                 else:
-                    priority = states['priority']
+                    states['priority'] = states['priority']
+
             elif common['algorithm']=='advanced_ldc':
                 # priority is based on the flexibility and random number from normal distribution of mean 0 and std 1.0
-                # normalized_flexibility = normalize(states['flexibility'], a_min=0, a_max=1, x_max=1.0, x_min=0.0)
-                flex_priority = normalize(states['flexibility']*100, a_min=1, a_max=99, x_max=100, x_min=0)
-                uniform_priority = np.random.uniform(1, 99, len(states['priority']))
-                new_priority = np.add(np.multiply(flex_priority, common['flex']), np.multiply((1-common['flex']), uniform_priority))
-                w = np.exp(-np.divide(common['step_size'], 3600))
-                priority = ((w)*states['priority']) + ((1-w)*new_priority)  # alpha=1-w in exponentially weight moving average
+                # flex_priority = normalize(states['flexibility']*100, a_min=1, a_max=99, x_max=100, x_min=0)
+                states['priority'] = states['flexibility'] *100
+                # compute_normalize(
+                #     states['flexibility'], 
+                #     np.zeros(states['flexibility'].size), 
+                #     np.ones(states['flexibility'].size), 
+                #     np.ones(states['flexibility'].size)*1, 
+                #     np.ones(states['flexibility'].size)*100,
+                #     )
+
+                # uniform_priority = np.random.uniform(1, 100, len(states['priority']))
+                # new_priority = np.add(np.multiply(flex_priority, common['flex']), np.multiply((1-common['flex']), uniform_priority))
+                # w = np.exp(-np.divide(common['step_size'], 3600))
+                # states['priority'] = ((w)*states['priority']) + ((1-w)*new_priority)  # alpha=1-w in exponentially weight moving average
                 
                 # priority = np.array([np.random.choice([100, x], p=[f, 1-f]) for x, f in zip(priority, normalized_flexibility)])
                 # if (common['unixtime']%60 < 1):
                 #     priority = swap_priority(states['priority'])
                 # else:
                 #     priority = states['priority']
-                # cdiv = 59
+                
                 # priority = spread(states['flexibility']*100)
+
+            ### get offset of priority from the ldc_signal
+            states['priority_offset'] = compute_priority_offset(states['priority'], states['ldc_signal']) 
+            
             ### change actual_status
             if states['load_type'][0] in ['clothesdryer', 'clotheswasher', 'dishwasher']:
-                partial_status = np.multiply(proposed_status, ((priority<=ldc_signal)|np.invert(states['with_dr'])|(states['flexibility']<=0))*1)
-                actual_status = (((states['actual_status']==1)&(states['finished']==0)) | ((partial_status==1)&(states['actual_status']==0)))*1
+                partial_status = compute_actual_status(
+                    states['with_dr'],
+                    states['proposed_status'],
+                    states['priority_offset'],
+                    states['flexibility'],
+                    states['min_cycletime'],
+                    states['counter'],
+                    )
+                
+                ### avoid interruption if already in operation
+                states['actual_status'] = (((states['actual_status']==1)&(states['finished']==0)) | ((partial_status==1)&(states['actual_status']==0)))*1
+                
             elif states['load_type'][0] in ['heatpump', 'fridge', 'freezer']:
                 if common['tcl_control'] in ['setpoint', 'mixed']:
-                    actual_status = np.multiply(1, ((priority<=ldc_signal)|np.invert(states['with_dr']))*1)
-                    idx = np.flatnonzero(states['with_dr'])
-                    states['temp_target'][idx] = adjust_setpoint(actual_status=actual_status[idx],
-                                                    mode=states['mode'][idx], 
-                                                    cooling_setpoint=states['cooling_setpoint'][idx], 
-                                                    heating_setpoint=states['heating_setpoint'][idx], 
-                                                    temp_target=states['temp_target'][idx],
-                                                    upper_limit=np.subtract(states['temp_max'][idx], states['tolerance'][idx]), 
-                                                    lower_limit=np.add(states['temp_min'][idx], states['tolerance'][idx]),
-                                                    algorithm=common['algorithm'],
-                                                    step_size=common['step_size'])
-                
-                elif common['tcl_control'] in ['setpoint2', 'mixed2']:  # temp_target is coupled with the ldc_signal
-                    actions.update({'temp_target': np.add(states['temp_min'], np.multiply(np.subtract(states['temp_max'], states['temp_min']), np.divide(states['ldc_signal'], 100))) })
+                    states['actual_status'] = states['proposed_status']
+
+                    states['temp_target'] = adjust_setpoint(
+                        states['with_dr'], 
+                        states['heating_setpoint'], 
+                        states['cooling_setpoint'], 
+                        states['temp_min'], 
+                        states['temp_max'], 
+                        states['temp_target'], 
+                        states['mode'], 
+                        states['priority_offset'],
+                        )
+                    
                 else:
-                    actual_status = np.multiply(proposed_status, ((priority<=ldc_signal)|np.invert(states['with_dr'])|(states['flexibility']<=0))*1)
-
+                    states['actual_status'] = compute_actual_status(
+                        states['with_dr'],
+                        states['proposed_status'],
+                        states['priority_offset'],
+                        states['flexibility'],
+                        states['min_cycletime'],
+                        states['counter'],
+                        )
+                                        
             elif states['load_type'][0] in ['heater', 'waterheater']:
-                actual_status = np.multiply(proposed_status, ((priority<=ldc_signal)|np.invert(states['with_dr'])|(states['flexibility']<=0))*1)
-            else:
-                actual_status = np.multiply(proposed_status, ((priority<=ldc_signal)|np.invert(states['with_dr'])|(states['flexibility']<=0))*1)
-            
-            # if common['algorithm']=='advanced_ldc':
-            #   actual_status = np.multiply(actual_status, [np.random.choice([0, 1], p=[f, 1-f]) for f in normalized_flexibility])
+                ### define minimum cycle time to avoid jitter in ON/OFF of relay
+                states['min_cycletime'] = compute_min_cycletime(states['priority'], states['ldc_signal'])
+                ### change proposed_status to avoid thermostat lock out
+                states['actual_status'] = compute_actual_status(
+                    states['with_dr'],
+                    compute_revised_status(
+                        states['mode'], 
+                        states['proposed_status'], 
+                        states['temp_in'], 
+                        states['temp_target'], 
+                        states['tolerance']),  # revise proposed status to avoid thermostat lockout
+                    states['priority_offset'],
+                    states['flexibility'],
+                    states['min_cycletime'],
+                    states['counter'],
+                    )
+                
+                # states['actual_status'] = compute_changed_status(old_status, states['actual_status'], states['counter'], states['min_cycletime'])
 
+            else:
+                states['actual_status'] = compute_actual_status(
+                    states['with_dr'],
+                    states['proposed_status'],
+                    states['priority_offset'],
+                    states['flexibility'],
+                    states['min_cycletime'],
+                    states['counter'],
+                    )
+                                            
         elif common['algorithm']=='ripple_control':
             if common['hour']<=7:
                 channels = np.subtract(100, states['priority'])  # order is reversed
             else:
                 channels = states['priority']
-            priority = states['priority']
-            actual_status = np.multiply(proposed_status, ((channels<=ldc_signal)|np.invert(states['with_dr']))*1).flatten()
+            
+            if 'waterheater' in states['load_type']:
+                states['priority_offset'] = compute_priority_offset(['priority'], states['ldc_signal'])
+                states['actual_status'] = compute_actual_status(
+                                    states['with_dr'],
+                                    states['proposed_status'],
+                                    states['priority_offset'],
+                                    np.ones(states['flexibility'].size),
+                                    states['min_cycletime'],
+                                    states['counter'],
+                                    )
+            else:
+                states['actual_status'] = states['proposed_status']
 
             # NOTE: priorities are equivalent to channels, i.e., 20-80 : 11A10-11A25
             # signals are sent in steps of 5, i.e, 20, 25, 30, 35
             # each channel is turned ON for 7.5 hours between 9PM to 7AM
 
-        count_offset = np.subtract(states['counter'], states['min_cycletime'])
-        ready_to_change = np.flatnonzero((count_offset>0)&(count_offset%cdiv<1))  # index of counters > min_cycletime
-        changed = np.flatnonzero(np.add(states['actual_status'][ready_to_change], actual_status[ready_to_change])==1)  # index of those that actually changed, a changed status will add to 1, i.e., 0 to 1 = 0 + 1 = 1
-        # if states['load_type'][0]=='heater': print(states['min_cycletime'][0], states['counter'][0], states['actual_status'][0], actual_status[0])
-        # if states['load_type'][0] in ['waterheater', 'heater']: print(states['load_type'][0], np.round(np.min(states['counter']), 3), len(states['load_type']), len(ready_to_change), len(changed))
-        states['actual_status'][ready_to_change] = actual_status[ready_to_change]
-        states['counter'] = np.add(states['counter'], common['step_size'])  
-        # for units that changed in status, reset counter to zero
-        states['counter'][ready_to_change[changed]] = count_offset[ready_to_change[changed]] # + np.random.uniform(-3.0, 0.0, len(changed))  # 15:3bins per second
-        actions.update({
-            'priority': priority, 
-            'actual_status':states['actual_status'], 
-            'ldc_signal':ldc_signal, 
-            'old_signal':dict_signal['old_signal'], 
-            'counter':states['counter']
-            })
-        
-        return actions
+        states['counter'] = compute_counter(old_status, states['actual_status'], states['counter'], states['step_size'])
+
+        if 'ev' in states['load_type']:
+        #     idx_max = 42 #np.argsort(states['priority_offset']) #np.argmax(states['priority_offset'])
+            print(
+                common['isotime'], 
+                states['actual_demand'][:2],
+                # np.subtract(states['unixend'][:2], states['unixtime'][:2]),
+                states['priority'][:2],
+                states['soc'][:2], 
+                states['target_soc'][:2], 
+                states['flexibility'][:2], 
+                common['ldc_signal'])
+            # print(
+            #     # common['ldc_signal'].round(1),
+            #     # states['min_cycletime'][idx_max].mean().round(1),
+            #     states['ldc_signal'][idx_max].mean().round(1),
+            #     states['counter'][idx_max].mean().round(1), 
+            #     states['min_cycletime'][idx_max].mean().round(1), 
+            #     states['priority_offset'][idx_max].mean().round(1), 
+            #     states['actual_status'][idx_max].mean(), 
+            #     # states['ldc_signal'][idx_max].mean().round(1), 
+            #     # states['priority'][idx_max].mean().round(1), 
+            #     states['actual_demand'][idx_max].mean().round(1),
+            #     # states['soc'][idx_max].mean(), 
+            #     states['flexibility'][idx_max].mean().round(1),
+            #     states['temp_in'][idx_max].mean().round(1)
+            # )
+
+
+        return states
     except Exception as e:
         print(f"Error MODELS.ldc_dongle:{e}")
         return {}
@@ -1678,48 +2209,175 @@ def ldc_dongle(states, common):
     
     
 
-def adjust_setpoint(actual_status, mode, cooling_setpoint, heating_setpoint, temp_target, upper_limit, lower_limit, algorithm, step_size):
-    '''Adjust the setpoint
-    Inputs:
-        actual_status = approved status from the function ldc_dongle
-        mode = 0 for cooling, 1 for heating
-        cooling_setpoint = current setpoint
-        heating_setpoint = current setpoint
-        upper_limit = max allowable setpoint
-        lower_limit = min allowable setpoint
-        algorithm = algorithm used
-        step_size = time elapsed
-    Outputs:
-        new_setpoint
+def adjust_setpoint(with_dr, heating_setpoint, cooling_setpoint, temp_min, temp_max, temp_target, mode, priority_offset):
     '''
-    try:
-        if algorithm in ['no_ldc', 'ripple_control', 'scheduled_ripple', 'peak_ripple', 'emergency_ripple']:
-            temp_target = np.add(np.multiply((cooling_setpoint), (mode==0)*1), 
-                np.multiply((heating_setpoint), (mode==1)*1))
-
-            return temp_target
-        else:
-            ### decrease heating temp
-            heating_decreased = np.multiply(np.subtract(temp_target, 0.1), np.multiply(((mode==1)*1), ((actual_status==0)*1)))
-            heating_increased = np.multiply(np.add(temp_target, 0.1), np.multiply(((mode==1)*1), ((actual_status==1)*1)))
-            ### increase cooling temp
-            cooling_increased = np.multiply(np.add(temp_target, 0.1), np.multiply(((mode==0)*1), ((actual_status==0)*1)))
-            cooling_decreased = np.multiply(np.subtract(temp_target, 0.1), np.multiply(((mode==0)*1), ((actual_status==1)*1)))
-
-            new_cooling = np.clip(np.add(cooling_decreased, cooling_increased), a_min=(lower_limit+upper_limit)*0.5, a_max=upper_limit)
-            new_heating =  np.clip(np.add(heating_decreased, heating_increased), a_min=lower_limit, a_max=(lower_limit+upper_limit)*0.5)
-            temp_target = np.add(np.multiply(new_cooling, (mode==0)*1), np.multiply(new_heating, (mode==1)*1))
-
-            return np.round(temp_target, 1)
-
-    except Exception as e:
-        print(f"Error MODELS.adjust_setpoint{e}")
-        return temp_target
+    Adjust the setpoint
+    
+    Args:
+        with_dr: boolean if device is LDC enabled [0,1]
+        heating_setpoint: temperature setpoint for heating mode
+        cooling_setpoint: temperature setpoint for cooling mode
+        temp_min: lowest allowable setpoint
+        temp_max: highest allowable setpoint
+        temp_target: target temperature from previous time step
+        mode: operation mode [0=cooling, 1=heating]
+        priority_offset: difference between ldc_signal and priority value
         
+    Returns:
+        temp_target: adjusted setpoint target
+
+    References:
+
+    '''
+    if with_dr==1 and temp_target<=temp_min:
+        return temp_min
+    elif with_dr==1 and temp_target>=temp_max:
+        return temp_max
+    elif with_dr==1 and mode==0:
+        return cooling_setpoint + (priority_offset*0.01*(temp_max-temp_min))
+    elif with_dr==1 and mode==1:
+        return heating_setpoint + (priority_offset*0.01*(temp_max-temp_min))
+    else:
+        return temp_target
+    
+    # elif with_dr==1 and ((mode==0 and actual_status==1) or (mode==1 and actual_status==0)):
+    #     return temp_target - 0.1
+    # elif with_dr==1 and ((mode==0 and actual_status==0) or (mode==1 and actual_status==1)):
+    #     return temp_target + 0.1
+    # else:
+    #     return temp_target
+
+
+    # try:
+    #     if algorithm in ['no_ldc', 'ripple_control', 'scheduled_ripple', 'peak_ripple', 'emergency_ripple']:
+    #         temp_target = np.add(np.multiply((cooling_setpoint), (mode==0)*1), 
+    #             np.multiply((heating_setpoint), (mode==1)*1))
+
+    #         return temp_target
+    #     else:
+            
+    #         ### decrease heating temp
+    #         heating_decreased = np.multiply(np.subtract(temp_target, 0.1), np.multiply(((mode==1)*1), ((actual_status==0)*1)))
+    #         heating_increased = np.multiply(np.add(temp_target, 0.1), np.multiply(((mode==1)*1), ((actual_status==1)*1)))
+    #         ### increase cooling temp
+    #         cooling_increased = np.multiply(np.add(temp_target, 0.1), np.multiply(((mode==0)*1), ((actual_status==0)*1)))
+    #         cooling_decreased = np.multiply(np.subtract(temp_target, 0.1), np.multiply(((mode==0)*1), ((actual_status==1)*1)))
+
+    #         new_cooling = np.clip(np.add(cooling_decreased, cooling_increased), a_min=(lower_limit+upper_limit)*0.5, a_max=upper_limit)
+    #         new_heating =  np.clip(np.add(heating_decreased, heating_increased), a_min=lower_limit, a_max=(lower_limit+upper_limit)*0.5)
+    #         temp_target = np.add(np.multiply(new_cooling, (mode==0)*1), np.multiply(new_heating, (mode==1)*1))
+
+    #         return np.round(temp_target, 1)
+
+    # except Exception as e:
+    #     print(f"Error MODELS.adjust_setpoint{e}")
+    #     return temp_target
+        
+def update_from_common(states, common):
+    '''
+    Update global data from common dictionary.
+
+    Args:
+        states: state parameters of the device
+        common: global parameters
+    
+    Returns:
+        states: updated states
+    '''
+    states['unixtime'] = np.ones(states['load_type'].size) * common['unixtime']
+    states['step_size'] = np.ones(states['load_type'].size) * common['step_size']
+    return states
+
+
 
 ######## model for person #################
 # from numba import jit
 # @jit(nopython=True)
+
+def compute_is_connected(unixtime, unixstart, unixend):
+    '''
+    Determine if the device is plugged in or in use.
+
+    Args:
+        unixtime: current timestamp
+        unixstart: timestamp for earliest usage start
+        unixend: timestamp for latest usage finish
+    
+    Returns:
+        connected: boolean status if connected [0,1]
+    '''
+    if unixtime>=unixstart and unixtime<=unixend:
+        return 1
+    else:
+        return 0
+
+def compute_is_driving(unixtime, unixstart, unixend, trip_time):
+    if unixtime>unixend and unixtime<=(unixend+(trip_time*3600)):
+        return 1
+    elif unixtime>unixstart and unixtime<=(unixstart+(trip_time*3600)):
+        return 1
+    else:
+        return 0
+
+def compute_adjusted_connected(connected, driving):
+    if driving==1:
+        return 0
+    else:
+        return connected
+
+
+    
+
+def update_schedules(states, common):
+    '''
+    Update the usage schedules i.e., unixstart and unixend of the devices.
+
+    Args:
+        states: state variables of the devices
+        common: common global variables, including schedules
+    
+    Returns:
+        states: updated states
+    '''
+    new_tasks = common['current_task'][states['schedule']].values
+    tasks_id = np.floor(new_tasks)
+    durations = np.multiply(np.subtract(new_tasks, tasks_id), 1e5)
+
+    idx_updated = np.flatnonzero(tasks_id==states['load_type_id'][0])
+
+    states['unixstart'][idx_updated] = states['unixtime'][idx_updated] + np.abs(states['schedule_skew'][idx_updated])
+    states['unixend'][idx_updated] = states['unixstart'][idx_updated] + durations[idx_updated]
+
+    if states['load_type'][0] in ['storage', 'baseload', 'house']:
+        states['connected'] = np.ones(states['connected'].size)
+    
+    else:
+        states['connected'] = compute_is_connected(
+            states['unixtime'], 
+            states['unixstart'], 
+            states['unixend'],
+            )
+
+    if 'ev' in states['load_type']:
+        states['driving'] = compute_is_driving(
+            states['unixtime'],
+            states['unixstart'], 
+            states['unixend'],
+            states['trip_time']/2,
+            )
+        
+        states['connected'] = compute_adjusted_connected(
+            states['connected'],
+            states['driving'],
+            )
+
+        
+    if states['load_type'][0] in ['dishwasher', 'clotheswasher', 'clothesdryer']:
+        states['progress'][idx_updated] = np.zeros(idx_updated.size)
+
+    return states
+
+
 def make_schedule(unixtime, current_task, load_type_id, unixstart, unixend, schedule_skew):
     '''
     Make task schedules for different loads
@@ -1746,7 +2404,8 @@ def make_schedule(unixtime, current_task, load_type_id, unixstart, unixend, sche
         unixend = np.add(np.multiply(retain, unixend), np.multiply(update, new_unixend))
         return {
             'unixstart': unixstart, 
-            'unixend': unixend}
+            'unixend': unixend,
+            }
     except Exception as e:
         print(f"Error MODELS.make_schedule:{e}")
     
@@ -1807,35 +2466,64 @@ def get_solar(unixtime, humidity, latitude, longitude, elevation,
         print("Error MODELS.solar_heat:",e)
         return {}
 
-def sum_heat_sources(solar_heat, heating_power_thermal, cooling_power_thermal):
-    return {
-        'heat_all':np.add(solar_heat, np.add(heating_power_thermal, cooling_power_thermal))
-    }
 
 
+def initialize_load(load_type, dict_devices, dict_house, idx, distribution, common, realtime=True):
+    dict_load_type_id = {
+            'heater':3,
+            'dishwasher':4,
+            'clothesdryer':5,
+            'clotheswasher':6,
+            'storage':7,
+            'ev':8,
+            'fridge':9,  # always ON
+            'freezer':10,  # always ON
+            'heatpump':11,
+            'waterheater':12,  # always ON
+            'valve':13,
+            'humidifier':16,
+            'window':18,
+            'door':23,
+            'human':27
+        }
 
-def initialize_load(load_type, dict_devices, dict_house, idx, distribution, realtime=True):
     n_house = dict_devices['house']['n_units']
     n_units = dict_devices[load_type]['n_units']
     n_ldc = dict_devices[load_type]['n_ldc']
+    n_b2g = dict_devices[load_type]['n_b2g']
+    
     with pd.HDFStore('./specs/device_specs.h5', 'r') as store:
         df = store.select(load_type, where='index>={} and index<{}'.format(idx, idx+n_units))
         if 'with_dr' in df.columns:
             idxs = df.index
             if distribution=='per_device':
-                df['with_dr'] = False
+                df['with_dr'] = 0
                 selection = np.random.choice(idxs, n_ldc, replace=False)
-                df.loc[selection, 'with_dr'] = True
+                df.loc[selection, 'with_dr'] = 1
             else:
-                df.loc[idxs[0:n_ldc], 'with_dr'] = True
-                df.loc[idxs[n_ldc:], 'with_dr'] = False
+                df.loc[idxs[0:n_ldc], 'with_dr'] = 1
+                df.loc[idxs[n_ldc:], 'with_dr'] = 0
         
+        ### assign b2g
+        df['b2g'] = 0
+        idxs = df.index
+        if distribution=='per_device':
+            df['b2g'] = 0
+            selection = np.random.choice(idxs, n_b2g, replace=False)
+            df.loc[selection, 'b2g'] = 1
+        else:
+            df.loc[idxs[0:n_b2g], 'b2g'] = 1
+            df.loc[idxs[n_b2g:], 'b2g'] = 0
+
         dict_out = df.to_dict(orient='list')
         del df
 
     for k, v in dict_out.items():
         dict_out[k] = np.array(v)
     
+    dict_out['unixstart'] = np.random.normal(common['unixtime'] - (common['hour']*3600), 0.1, n_units)
+    dict_out['unixend'] = np.random.normal(common['unixtime'] - (common['hour']*3600) + (3600*24), 0.1, n_units)
+        
     if load_type in ['heatpump', 'heater']:
         dict_out['latitude'] = dict_house['latitude'][np.arange(n_units)%n_house]
         dict_out['longitude'] = dict_house['longitude'][np.arange(n_units)%n_house]
@@ -1848,40 +2536,68 @@ def initialize_load(load_type, dict_devices, dict_house, idx, distribution, real
         dict_out['window_area'] = dict_house['window_area'][np.arange(n_units)%n_house]
         dict_out['skylight_area'] = dict_house['skylight_area'][np.arange(n_units)%n_house]
         dict_out['mass_flow'] = np.zeros(n_units)   
-        dict_out['temp_target'] = dict_out['heating_setpoint'] 
+        dict_out['temp_target'] = dict_out['heating_setpoint']
         dict_out['solar_heat'] = np.zeros(n_units)
+        dict_out['power_thermal'] = np.zeros(n_units)
+        dict_out['heat_all'] = np.zeros(n_units)
+        
 
     if load_type in ['fridge', 'freezer']:
         dict_out['mass_flow'] = np.zeros(n_units)
         dict_out['mode'] = np.zeros(n_units)
         dict_out['temp_target'] = dict_out['cooling_setpoint']
+        dict_out['solar_heat'] = np.zeros(n_units)
+        dict_out['power_thermal'] = np.zeros(n_units)
+        dict_out['heat_all'] = np.zeros(n_units)
         # air density is 1.225kg/m^3 at 15degC sea level
         # air density is 1.2041 kg/m^3 at 20 degC sea level
         # water density is 999.1 kg/m^3 at 15degC sea level
     if load_type in ['heater', 'waterheater']:
         dict_out['mode'] = np.ones(n_units)
         dict_out['temp_target'] = dict_out['heating_setpoint']
+        dict_out['temp_max'] = dict_out['temp_target'] + (dict_out['tolerance']*0.9)
         dict_out['min_cycletime'] = np.random.uniform(1, 1.1, n_units)
+        dict_out['solar_heat'] = np.zeros(n_units)
+        dict_out['power_thermal'] = np.zeros(n_units)
+        dict_out['heat_all'] = np.zeros(n_units)
         # dict_out['counter'] = np.random.uniform(2, 3, n_units)
         # dict_out['temp_in'] = np.random.normal(np.mean(dict_out['temp_in']), np.std(dict_out['temp_in']), n_units)
 
     if load_type in ['ev', 'storage']:
+        dict_out['soc'] = np.random.uniform(0.6, 0.7, n_units)
         dict_out['progress'] = np.divide(dict_out['soc'], dict_out['target_soc'])
         dict_out['mode'] = np.zeros(n_units)
+        dict_out['min_soc'] = np.random.uniform(0.3, 0.4, n_units)
+        dict_out['target_soc'] = np.random.uniform(0.9, 0.95, n_units)
+        dict_out['connected'] = np.ones(n_units)
+        
         # dict_out['schedule_skew'] = np.random.uniform(-900, 900, n_units)
+    
+    if load_type=='ev':
+        df_evSpecs['trip_distance'] = np.random.uniform(10, 50, n_units) # [km] avg daily trip
+        df_evSpecs['trip_time'] = np.random.uniform(0.25, 1.5, n_units) #[hours] avg daily trip
+        df_evSpecs['km_per_kwh'] = np.random.uniform(4.225, 6.76, n_units) #[km/kWh] 1kWh per 6.5 km avg 
+        
+        dict_out['driving_power'] = ((dict_out['trip_distance']/dict_out['trip_time']) / dict_out['km_per_kwh']) * 1000 * -1 #[W]
+        dict_out['unixstart'] = np.random.normal(common['unixtime'] - (common['hour']*3600) - (6*3600), 1800, n_units)
+        dict_out['unixend'] = np.random.normal(common['unixtime'] - (common['hour']*3600) + (6*3600), 1800, n_units)
+        
     if load_type in ['dishwasher', 'clothesdryer', 'clotheswasher']:
-        dict_out['finished'] = np.zeros(n_units)
-        dict_out['unfinished'] = np.ones(n_units) * 0.3
+        dict_out['finished'] = np.ones(n_units)
+        dict_out['unfinished'] = np.zeros(n_units) 
+        dict_out['unixstart'] = np.random.normal(common['unixtime'] - (common['hour']*3600)- (3600*24) + (3600*18), 900, n_units)
+        dict_out['unixend'] = np.random.normal(common['unixtime'] - (common['hour']*3600) - (3600*24) + (3600*21) , 900, n_units)
+      
     if load_type in ['solar', 'wind']:
         dict_out['mode'] = np.ones(n_units)  # generation modes are 1
         dict_out['priority'] = np.zeros(n_units)
     
     dict_out['house'] = dict_house['name'][np.arange(n_units)%n_house]
     dict_out['schedule'] = dict_house['schedule'][np.arange(n_units)%n_house] 
-    dict_out['unixstart'] = np.zeros(len(dict_out['schedule']))
-    dict_out['unixend'] = np.ones(len(dict_out['schedule']))  
+    dict_out['load_type_id'] = np.ones(n_units) * dict_load_type_id[load_type]
     dict_out['old_signal'] = np.zeros(n_units)
     dict_out['ldc_signal'] = np.zeros(n_units)
+    dict_out['priority_offset'] = np.subtract(dict_out['ldc_signal'], dict_out['priority'])
     # dict_out['counter'] = np.random.uniform(0, 30, n_units)
     # dict_out['min_cycletime'] = np.random.uniform(5, 30, n_units)
     # print(dict_out['load_type'][0], 'counter', dict_out['counter'])
@@ -1923,6 +2639,7 @@ def initialize_device(n_parent, n_device, device_type, schedule):
     dict_self.update({'schedule':schedule})
     return dict_self
 
+
 def update_device(n_device, device_type, dict_startcode, dict_self, dict_parent, dict_common):
     '''Update the variables for windows, valves, or doors
     inputs:
@@ -1952,3 +2669,24 @@ def update_device(n_device, device_type, dict_startcode, dict_self, dict_parent,
     
     return dict_self
                         
+
+
+try:
+    from inspect import isfunction
+    from numba import vectorize, njit, guvectorize
+
+    has_numba = True
+    # Vectorise all 'core' functions. 
+    # Utility function are excluded as they are just wrappers.
+    numba_funcs = []
+    for func in list(globals().items()):
+        if isfunction(func[1]) and func[0].startswith(('compute', 'read_signal', 'adjust_setpoint')):
+            globals()[func[0]] = vectorize(func[1])
+            numba_funcs.append(func)
+        # elif isfunction(func[1]) and func[0].startswith(('read_signal')):
+        #     globals()[func[0]] = guvectorize(func[1])
+        #     numba_funcs.append(func)
+
+except ImportError:
+    has_numba = False
+

@@ -1,5 +1,5 @@
 
-from MODELS import *
+from models import *
 
 # def send_msgs(conn, msgs)
 #   for msg in msgs:
@@ -128,7 +128,7 @@ class Aggregator(multiprocessing.Process):
             self.casefolder = casefolder
             self.target = target
             if target in ['auto', 'tou']:
-                self.target_loading = 30.0
+                self.target_loading = 50.0
             else:
                 self.target_loading = float(target)
         else:
@@ -167,14 +167,15 @@ class Aggregator(multiprocessing.Process):
             })
         self.dict_common.update(clock(unixtime=self.dict_common['unixtime'], step_size=self.step_size, realtime=self.realtime))
         self.pause = 1e-64  # pause time used in thread interrupts
-        self.save_interval = 1000
+        self.save_interval = 3600
+        self.start_unixtime = self.dict_common['unixtime']
 
         self.dict_startcode = {
             'heater':3,
             'dishwasher':4,
             'clothesdryer':5,
             'clotheswasher':6,
-            'storage':7,
+            'storage':7, # always connected
             'ev':8,
             'fridge':9,  # always ON
             'freezer':10,  # always ON
@@ -184,7 +185,8 @@ class Aggregator(multiprocessing.Process):
             'humidifier':16,
             'window':18,
             'door':23,
-            'human':27
+            'human':27,
+            'solar':28,
         }
 
         self.add_device(dict_new_devices=dict_devices)
@@ -197,15 +199,17 @@ class Aggregator(multiprocessing.Process):
         for load_type in dict_new_devices.keys():
             n_units = dict_new_devices[load_type]['n_units']  # new devices
             n_ldc = dict_new_devices[load_type]['n_ldc']
+            n_b2g = dict_new_devices[load_type]['n_b2g']
             if load_type in self.dict_devices.keys():
                 idx = self.idx + self.dict_devices[load_type]['n_units']  # exisiting number of devices
                 self.dict_devices[load_type].update({
                     'n_units': self.dict_devices[load_type]['n_units'] + n_units,
                     'n_ldc': self.dict_devices[load_type]['n_ldc'] + n_ldc,
+                    'n_b2g': self.dict_devices[load_type]['n_b2g'] + n_b2g,
                     })
             else:
                 idx = self.idx
-                self.dict_devices.update({load_type:{ 'n_units': n_units, 'n_ldc': n_ldc }
+                self.dict_devices.update({load_type:{ 'n_units': n_units, 'n_ldc': n_ldc, 'n_b2g': n_b2g}
                     })  # update number of devices
 
         ### create house data
@@ -273,6 +277,12 @@ class Aggregator(multiprocessing.Process):
         df_schedules = pd.read_csv('./specs/schedules.csv')      
         self.dict_schedule["schedule_profile"] =  self.dict_house["schedule"]
     
+        ### update clock
+        self.dict_common.update(clock(unixtime=self.dict_common['unixtime'], step_size=self.step_size, realtime=self.realtime))
+        ### update weather
+        self.dict_common.update(self.weather.get_weather(self.dict_common['unixtime']))
+        
+
         # run list_processes
         self.dict_common.update({'is_alive': True, 'ldc_signal':0.0})
         for t in self.list_processes:
@@ -280,23 +290,23 @@ class Aggregator(multiprocessing.Process):
             t.start()
             print(f"Running {t.name}...")
 
-        agg_data = {}
-        factor = 0.013333  # regression factor to predict percent_loss
-        pfe_mw = 2.7*1e-3
+        # agg_data = {}
+        factor = 0.005 #0.01333  # regression factor to predict percent_loss
+        pfe_mw = 0 #2.7*1e-3
         sn_mva = 0.3
         pf = 0.9
-        list_latest = []
-        actual_loading = 0
-        list_signal = []
-        tprint = 0
+        # list_latest = []
+        # actual_loading = 0
+        # list_signal = []
+        # tprint = 0
         t1 = time.perf_counter()
-        tt = 0
-        f0 = 0
-        f1 = 0
-        p0 = 0
-        p1 = 0
-        dpdf = 0
-        ewma = 80 # [kw]
+        # tt = 0
+        # f0 = 0
+        # f1 = 0
+        # p0 = 0
+        # p1 = 0
+        # dpdf = 0
+        # ewma = 80 # [kw]
         ### Loop for the main process
         while True:
             try:
@@ -319,7 +329,7 @@ class Aggregator(multiprocessing.Process):
                 for p in self.load_pipes:
                     new = p.recv()
                     k = new['load_type'][0]
-
+                    
                     self.dict_summary_demand[f'{k}'] = [new['actual_demand'][new['house']==h].sum() for h in self.dict_house['name']]  # sum up loads per house
                     self.dict_summary_status[f'{k}'] = new['actual_status'].tolist()
                     self.dict_summary_mode[f'{k}'] = new['mode'].tolist()
@@ -347,11 +357,12 @@ class Aggregator(multiprocessing.Process):
 
 
                 if self.simulation==1:
-                    decay = np.exp(-self.dict_common['step_size']/86400)
-                    p_mw = np.sum(np.array(list(self.dict_summary_demand.values())), axis=0) * 1e-6
-                    nogrid_percent = np.sum(p_mw)*100/(sn_mva * pf)
-                    loss_percent = np.power(nogrid_percent,2) * factor # factors are derived using regression as compared with pandapower simulation
-                    self.dict_common['loading_percent'] = nogrid_percent #(nogrid_percent*(1-decay)) + (decay*self.dict_common['loading_percent'])  #+ loss_percent
+                    # decay = np.exp(-self.dict_common['step_size']/3)
+                    p_mw = np.sum(np.array(list(self.dict_summary_demand.values())), axis=0) * 1e-6 
+                    nogrid_percent = (np.sum(p_mw)+ pfe_mw)*100/(sn_mva * pf)
+                    # loss_percent = np.power(nogrid_percent,2) * factor # factors are derived using regression as compared with pandapower simulation
+                    self.dict_common['loading_percent'] = nogrid_percent # + loss_percent #(nogrid_percent*(1-decay)) + (decay*self.dict_common['loading_percent'])  #+ loss_percent
+
 
                     ### send data to network simulator
                     if not self.pipe_agg_network1.poll():
@@ -369,15 +380,15 @@ class Aggregator(multiprocessing.Process):
                 
                     
                     if self.target=='auto': 
-                        w = self.dict_common['step_size'] / 86400
-                        self.target_loading = (self.dict_common['loading_percent']*w) + (self.target_loading*(1-w)) 
+                        w = 1 - np.exp(-self.dict_common['step_size']/(3600)) #self.dict_common['step_size'] / (3600)
+                        self.target_loading = np.clip((self.dict_common['loading_percent']*(w)) + (self.target_loading*(1-w)), a_min=0.0, a_max=100.0)
 
 
                     elif self.target=='tou':
                         if (self.dict_common['hour']>=18) and (self.dict_common['hour']<=21):
-                            self.target_loading = 15
+                            self.target_loading = 20.0
                         else:
-                            self.target_loading = 30
+                            self.target_loading = 33.0
 
                         # if self.dict_common['minute']<15:
                         #     self.target_loading = 5.0
@@ -488,7 +499,7 @@ class Aggregator(multiprocessing.Process):
             import pandapower as pp
             import pandapower.networks as nw
             from pandapower.pf.runpp_3ph import runpp_3ph
-            
+            self.save_interval += np.random.randint(0,60)
             def convert_to_3ph(net, sn_mva=0.4):
                 ### update external grid
                 net.ext_grid["r0x0_max"] = 0.1
@@ -501,7 +512,7 @@ class Aggregator(multiprocessing.Process):
                 ### update transformer
                 net.trafo = net.trafo.head(0)
                 pp.create_std_type(net, {"sn_mva": sn_mva, "vn_hv_kv": 20, "vn_lv_kv": 0.4, "vk_percent": 6,
-                                        "vkr_percent": 0.78125, "pfe_kw": min([sn_mva*3, 2.7]), "i0_percent": 0.16875,
+                                        "vkr_percent": 0.78125, "pfe_kw": 2.7*0, "i0_percent": 0.16875,
                                         "shift_degree": 0, "vector_group": "YNyn",
                                         "tap_side": "hv", "tap_neutral": 0, "tap_min": -2, "tap_max": 2,
                                         "tap_step_degree": 0, "tap_step_percent": 2.5, "tap_phase_shifter": False,
@@ -539,7 +550,7 @@ class Aggregator(multiprocessing.Process):
                 net = nw.create_dickert_lv_network(feeders_range='long', 
                     linetype='C&OHL', customer='multiple', case='good', 
                     trafo_type_name='0.4 MVA 20/0.4 kV', trafo_type_data=None)
-                net.line.length_km = np.round(np.random.normal(0.040, 0.005, len(net.line.length_km)), 4)
+                net.line.length_km = np.round(np.random.normal(0.100, 0.005, len(net.line.length_km)), 4)
          
             elif self.network_grid=='ieee_european_lv':
                 net = nw.ieee_european_lv_asymmetric("off_peak_1")
@@ -662,7 +673,7 @@ class Aggregator(multiprocessing.Process):
                             'q_c_mvar': ','.join(np.char.zfill(np.round(load_data['q_c_mvar'], 6).astype(str), 10)),
                             }})
 
-                        if (len(dict_save_trafo.keys())>=self.save_interval) and (self.case!=None):
+                        if ((self.dict_common['unixtime']-self.start_unixtime)>=self.save_interval) and (self.case!=None):
                             # dict_save_trafo = save_pickle(dict_save_trafo, path=f'/home/pi/studies/results/{self.casefolder}/{self.case}/trafo.pkl')
                             # dict_save_bus = save_pickle(dict_save_bus, path=f'/home/pi/studies/results/{self.casefolder}/{self.case}/bus.pkl')
                             # dict_save_line = save_pickle(dict_save_line, path=f'/home/pi/studies/results/{self.casefolder}/{self.case}/line.pkl')
@@ -672,7 +683,8 @@ class Aggregator(multiprocessing.Process):
                             dict_save_bus = save_data(dict_save_bus, case=self.case,  folder=self.casefolder, filename=f'bus.h5')
                             dict_save_line = save_data(dict_save_line, case=self.case,  folder=self.casefolder, filename=f'line.h5')
                             dict_save_load = save_data(dict_save_load, case=self.case,  folder=self.casefolder, filename=f'load.h5')
-                        
+                            self.start_unixtime = self.dict_common['unixtime']
+
                     time.sleep(self.pause)
                 except Exception as e:
                     print("Error AGGREGATOR.network:{}".format(e))
@@ -780,15 +792,18 @@ class Aggregator(multiprocessing.Process):
         n_units = self.dict_devices['house']['n_units']
         self.dict_baseload['mode'] = np.zeros(n_units)
         self.dict_baseload['flexibility'] = np.zeros(n_units)
+        self.save_interval += np.random.randint(0,60)
 
         dict_save = {}
         while True:
             try:
                 self.dict_common.update(self.pipe_agg_baseload1.recv())
-
                 if self.dict_common['is_alive']==False:
                     raise KeyboardInterrupt
             
+                ### update common variables
+                update_from_common(self.dict_baseload, self.dict_common)
+
                 ### update baseload
                 sk = np.mod(np.add(np.divide(self.dict_baseload['schedule_skew'], 60), self.dict_common['weekminute']), 10080)  # 10080 minutes in a week
                 self.dict_baseload['actual_demand'] = np.array([df.loc[x, y] for x, y in zip(sk.astype(int), self.dict_baseload['schedule'])]) + np.abs(np.random.normal(0,10,n_units))
@@ -807,9 +822,10 @@ class Aggregator(multiprocessing.Process):
                     else:  
                         dict_save.update(prepare_data(states=self.dict_baseload, common=self.dict_common))
 
-                    if (len(dict_save.keys())>=self.save_interval) and (self.case!=None):
+                    if (self.dict_common['unixtime']-self.start_unixtime)>=self.save_interval and (self.case!=None):
                         dict_save = save_data(dict_save, case=self.case,  folder=self.casefolder, filename='house.h5', summary=self.summary)
-                    
+                        self.start_unixtime = self.dict_common['unixtime']
+
                 time.sleep(self.pause)
             except Exception as e:
                 print("Error AGGREGATOR.baseload:", e)
@@ -825,10 +841,18 @@ class Aggregator(multiprocessing.Process):
     def heatpump(self):
         # print('Running heatpump...')
         n_units = self.dict_devices['heatpump']['n_units']
-        self.dict_heatpump.update(initialize_load(load_type='heatpump', 
-            dict_devices=self.dict_devices,
-            dict_house=self.dict_house, 
-            idx=self.idx, distribution=self.distribution))
+        self.dict_heatpump.update(
+            initialize_load(
+                load_type='heatpump', 
+                dict_devices=self.dict_devices,
+                dict_house=self.dict_house, 
+                idx=self.idx, 
+                distribution=self.distribution,
+                common=self.dict_common,
+                )
+            )
+        
+        self.save_interval += np.random.randint(0,60)
 
         if (self.simulation==0):
             while True:
@@ -872,6 +896,19 @@ class Aggregator(multiprocessing.Process):
                 self.dict_common.update(self.pipe_agg_heatpump1.recv())
                 if self.dict_common['is_alive']==False: 
                     raise KeyboardInterrupt
+                
+                ### update common variables
+                update_from_common(self.dict_heatpump, self.dict_common)
+                
+                ### update environment
+                self.dict_heatpump['temp_out'] = np.add(np.random.normal(0, 0.01, n_units), self.dict_common['temp_out'])
+                self.dict_heatpump['humidity'] = np.add(np.random.normal(0, 0.01, n_units), self.dict_common['humidity'])
+                self.dict_heatpump['windspeed'] = np.add(np.random.normal(0, 0.01, n_units), self.dict_common['windspeed'])
+                
+
+                ### update schedules
+                update_schedules(self.dict_heatpump, self.dict_common)
+
 
                 ### update window status
                 self.dict_window.update(update_device(n_device=1, 
@@ -881,52 +918,16 @@ class Aggregator(multiprocessing.Process):
                     dict_parent=self.dict_heatpump, 
                     dict_common=self.dict_common))
 
-                ### update mass_flow, air density = 1.225 kg/m^3
-                self.dict_heatpump['mass_flow'] = np.clip(np.multiply(self.dict_window['window0']['actual_status'], 
-                        np.random.normal(1.225*0.001*0.1, 1e-6, n_units)), a_min=1e-6, a_max=0.01225)  # 0.1 liter/s
-
-                # ### update unixstart and unixend
-                self.dict_heatpump.update(make_schedule(unixtime=self.dict_common['unixtime'],
-                    current_task=self.dict_common['current_task'][self.dict_heatpump['schedule']].values,
-                    load_type_id=self.dict_startcode['heatpump'], 
-                    unixstart=self.dict_heatpump['unixstart'],
-                    unixend=self.dict_heatpump['unixend'],
-                    schedule_skew=self.dict_heatpump['schedule_skew']))
                 
-                ### update if connected
-                self.dict_heatpump.update(is_connected(unixtime=self.dict_common['unixtime'],
-                    unixstart=self.dict_heatpump['unixstart'],
-                    unixend=self.dict_heatpump['unixend']))      
                 
                 ### update device proposed mode, status, priority, and demand
-                self.dict_heatpump.update(
-                    device_heatpump(mode=self.dict_heatpump['mode'], 
-                        temp_in=self.dict_heatpump['temp_in'], 
-                        temp_min=self.dict_heatpump['temp_min'], 
-                        temp_max=self.dict_heatpump['temp_max'],
-                        temp_out=self.dict_common['temp_out'], 
-                        temp_target=self.dict_heatpump['temp_target'],
-                        cooling_setpoint=self.dict_heatpump['cooling_setpoint'], 
-                        heating_setpoint=self.dict_heatpump['heating_setpoint'],
-                        tolerance=self.dict_heatpump['tolerance'], 
-                        cooling_power=self.dict_heatpump['cooling_power'], 
-                        heating_power=self.dict_heatpump['heating_power'],
-                        cop=self.dict_heatpump['cop'],
-                        standby_power=self.dict_heatpump['standby_power'],
-                        ventilation_power=self.dict_heatpump['ventilation_power'],
-                        proposed_status=self.dict_heatpump['proposed_status'],
-                        actual_status=self.dict_heatpump['actual_status'],
-                        tcl_control=self.dict_common['tcl_control']
-                    )
-                )
-                
+                device_tcl(self.dict_heatpump, self.dict_common, inverter=False)
+
                 ### update ldc_dongle approval for the proposed status and demand
-                self.dict_heatpump.update(ldc_dongle(self.dict_heatpump, self.dict_common))
-                
-                ### update environment
-                self.dict_heatpump['temp_out'] = np.add(np.random.normal(0, 0.01, n_units), self.dict_common['temp_out'])
-                self.dict_heatpump['humidity'] = np.add(np.random.normal(0, 0.01, n_units), self.dict_common['humidity'])
-                self.dict_heatpump['windspeed'] = np.add(np.random.normal(0, 0.01, n_units), self.dict_common['windspeed'])
+                ldc_dongle(self.dict_heatpump, self.dict_common)
+
+                ### send data to main
+                self.pipe_agg_heatpump1.send(self.dict_heatpump)                    
                 
                 ### update solar heat
                 self.dict_heatpump.update(get_solar(unixtime=self.dict_common['unixtime'], 
@@ -943,25 +944,14 @@ class Aggregator(multiprocessing.Process):
                     window_area=self.dict_heatpump['window_area'], 
                     skylight_area=self.dict_heatpump['skylight_area']))
                 
-                ### update heat from all sources
-                self.dict_heatpump.update(sum_heat_sources(solar_heat=self.dict_heatpump['solar_heat'], 
-                    heating_power_thermal=self.dict_heatpump['heating_power_thermal'], 
-                    cooling_power_thermal=self.dict_heatpump['cooling_power_thermal']))
-                
-                ### update device states, e.g., temp_in, temp_mat, through simulation
-                self.dict_heatpump.update(
-                    enduse_tcl(
-                        heat_all=self.dict_heatpump['heat_all'],
-                        temp_in=self.dict_heatpump['temp_in'],
-                        temp_out=self.dict_heatpump['temp_out'],
-                        temp_fill=self.dict_heatpump['temp_out'],
-                        Ua=self.dict_heatpump['Ua'],
-                        Cp=self.dict_heatpump['Cp'],
-                        Ca=self.dict_heatpump['Ca'],
-                        mass_flow= self.dict_heatpump['mass_flow'],
-                        step_size=self.dict_common['step_size'],
-                        )
-                    )
+
+                ### update mass_flow, air density = 1.225 kg/m^3
+                self.dict_heatpump['mass_flow'] = np.clip(np.multiply(self.dict_window['window0']['actual_status'], 
+                        np.random.normal(1.225*0.001*0.1, 1e-6, n_units)), a_min=1e-6, a_max=0.01225)  # 0.1 liter/s
+
+                ### update device states, e.g., temp_in, through simulation
+                enduse_tcl(self.dict_heatpump)
+                    
 
                 ### temporary calculation for indoor humidity
                 self.dict_heatpump['humidity_in'] = np.random.normal(1, 0.001, len(self.dict_heatpump['temp_in'])) * self.dict_common['humidity'] * 100
@@ -969,37 +959,40 @@ class Aggregator(multiprocessing.Process):
                 if self.simulation==0:
                     ### get actual sensibo state every 30 seconds
                     self.dict_heatpump['charging_counter'] = np.subtract(self.dict_heatpump['charging_counter'], self.dict_common['step_size'])
-                    if self.dict_common['second']%30==0:
-                        try:
-                            ### query sensibo state and history
-                            self.sensibo_state = self.sensibo_api.pod_ac_state(self.uid)
-                            # self.sensibo_history = self.sensibo_api.pod_history(self.uid)
-                            self.sensibo_measurement = self.sensibo_api.pod_measurement(self.uid)
-                            
-                            ### Actions
-                            self.dict_heatpump['connected'] = np.ones(n_units)  ### ardmore heatpumps are always ON
-                            # print(self.sensibo_state, self.dict_heatpump['temp_max'], self.dict_heatpump['temp_min'], self.dict_heatpump['tolerance'], self.dict_heatpump['temp_target'])
-                            ### change status ON/OFF
-                            if self.dict_heatpump['charging_counter']<=0:
-                                self.dict_heatpump['charging_counter'] = self.dict_heatpump['min_chargingtime']
-                                if self.dict_heatpump['connected'][0]==1 and self.sensibo_state['on']==False:
-                                    self.sensibo_api.pod_change_ac_state(self.uid, self.sensibo_state, "on", True) 
-                                elif self.dict_heatpump['connected'][0]==0 and self.sensibo_state['on']==True:
-                                    self.sensibo_api.pod_change_ac_state(self.uid, self.sensibo_state, "on", False)
-                                ### change mode if needed 
-                                if self.dict_heatpump['mode'][0]==1 and self.sensibo_state['mode']=='cool':
-                                    self.sensibo_api.pod_change_ac_state(self.uid, self.sensibo_state, "mode", "heat")  # change to heating
-                                elif self.dict_heatpump['mode'][0]==0 and self.sensibo_state['mode']=='heat':
-                                    self.sensibo_api.pod_change_ac_state(self.uid, self.sensibo_state, "mode", "cool")  # change to cooling
-                                ### implement targetTemperature adjustment
-                                if (self.sensibo_state['targetTemperature']!=int(self.dict_heatpump['temp_target'][0])):
-                                    self.sensibo_api.pod_change_ac_state(self.uid, self.sensibo_state, "targetTemperature", int(self.dict_heatpump['temp_target'][0]))
-                        except Exception as e:
-                            print(f"Error AGGREGATOR.heatpump.sensibo_operation:{e}")
-                            ### reconnect to sensibo database
-                            self.sensibo_api = SENSIBO.SensiboClientAPI('srBysNj0K9o6De9acaSz8wrvS2Qpju')
-                            self.sensibo_devices = self.sensibo_api.devices()
-                            self.uid = self.sensibo_devices[f'ldc_heatpump_h{int(self.house_num)}']
+                    
+                    try:
+                        ### query sensibo state and history
+                        self.sensibo_state = self.sensibo_api.pod_ac_state(self.uid)
+                        # self.sensibo_history = self.sensibo_api.pod_history(self.uid)
+                        self.sensibo_measurement = self.sensibo_api.pod_measurement(self.uid)
+                        
+                        ### Actions
+                        self.dict_heatpump['connected'] = np.ones(n_units)  ### ardmore heatpumps are always ON
+                        # print(self.sensibo_state, self.dict_heatpump['temp_max'], self.dict_heatpump['temp_min'], self.dict_heatpump['tolerance'], self.dict_heatpump['temp_target'])
+                        ### change status ON/OFF
+                        if self.dict_heatpump['charging_counter']<=0:
+                            self.dict_heatpump['charging_counter'] = self.dict_heatpump['min_chargingtime']
+                            if self.dict_heatpump['connected'][0]==1 and self.sensibo_state['on']==False:
+                                self.sensibo_api.pod_change_ac_state(self.uid, self.sensibo_state, "on", True) 
+                            elif self.dict_heatpump['connected'][0]==0 and self.sensibo_state['on']==True:
+                                self.sensibo_api.pod_change_ac_state(self.uid, self.sensibo_state, "on", False)
+                            ### change mode if needed 
+                            if self.dict_heatpump['mode'][0]==1 and self.sensibo_state['mode']=='cool':
+                                self.sensibo_api.pod_change_ac_state(self.uid, self.sensibo_state, "mode", "heat")  # change to heating
+                            elif self.dict_heatpump['mode'][0]==0 and self.sensibo_state['mode']=='heat':
+                                self.sensibo_api.pod_change_ac_state(self.uid, self.sensibo_state, "mode", "cool")  # change to cooling
+                            ### implement targetTemperature adjustment
+                            if (self.sensibo_state['targetTemperature']!=int(self.dict_heatpump['temp_target'][0])):
+                                self.sensibo_api.pod_change_ac_state(self.uid, self.sensibo_state, "targetTemperature", int(self.dict_heatpump['temp_target'][0]))
+                        time.sleep(30)
+                    except Exception as e:
+                        print(f"Error AGGREGATOR.heatpump.sensibo_operation:{e}")
+                        time.sleep(5)
+                        ### reconnect to sensibo database
+                        self.sensibo_api = SENSIBO.SensiboClientAPI('srBysNj0K9o6De9acaSz8wrvS2Qpju')
+                        self.sensibo_devices = self.sensibo_api.devices()
+                        self.uid = self.sensibo_devices[f'ldc_heatpump_h{int(self.house_num)}']
+                        
                             
                     ### update device states, e.g., temp_in, temp_mat, actual reading
                     self.dict_heatpump['temp_in'] = np.array([self.sensibo_measurement[0]['temperature']])
@@ -1012,18 +1005,17 @@ class Aggregator(multiprocessing.Process):
                     # self.dict_heatpump['temp_target'] = np.array([self.sensibo_state['targetTemperature']])
 
                 
-                ### send data to main
-                self.pipe_agg_heatpump1.send(self.dict_heatpump)                    
-                    
                 ### save data
                 if self.simulation and self.save_history:
                     if self.summary:
                         dict_save.update(prepare_summary(states=self.dict_heatpump, common=self.dict_common))
                     else:  
                         dict_save.update(prepare_data(states=self.dict_heatpump, common=self.dict_common))
-                    if (len(dict_save.keys())>=self.save_interval) and (self.case!=None):
+                    
+                    if (self.dict_common['unixtime']-self.start_unixtime)>=self.save_interval and (self.case!=None):
                         dict_save = save_data(dict_save, case=self.case,  folder=self.casefolder, filename='heatpump.h5', summary=self.summary)
-            
+                        self.start_unixtime = self.dict_common['unixtime']
+
                 time.sleep(self.pause)  # to give way to other threads
             except Exception as e:
                 print(f'Error AGGREGATOR.heatpump:{e}')
@@ -1037,11 +1029,19 @@ class Aggregator(multiprocessing.Process):
 
     def heater(self):
         # print('Running electric heater...')
-        self.dict_heater.update(initialize_load(load_type='heater', 
-            dict_devices=self.dict_devices,
-            dict_house=self.dict_house, 
-            idx=self.idx, distribution=self.distribution))
+        self.dict_heater.update(
+            initialize_load(
+                load_type='heater', 
+                dict_devices=self.dict_devices,
+                dict_house=self.dict_house, 
+                idx=self.idx, 
+                distribution=self.distribution,
+                common=self.dict_common,
+                )
+            )
         
+        self.save_interval += np.random.randint(0,60)
+
         dict_save = {}
         
         ### initialize windows 
@@ -1067,6 +1067,12 @@ class Aggregator(multiprocessing.Process):
                 self.dict_common.update(self.pipe_agg_heater1.recv())
                 if self.dict_common['is_alive']==False:
                     raise KeyboardInterrupt
+                
+                ### update common variables
+                update_from_common(self.dict_heater, self.dict_common)
+                
+                ### update schedules
+                update_schedules(self.dict_heater, self.dict_common)
 
                 ### update window status
                 self.dict_window.update(update_device(n_device=1, 
@@ -1076,46 +1082,16 @@ class Aggregator(multiprocessing.Process):
                     dict_parent=self.dict_heater, 
                     dict_common=self.dict_common))
 
-                ### update mass_flow, air density = 1.225 kg/m^3 at 15 degC 101.325kPa (sea level)
-                self.dict_heater['mass_flow'] = np.clip(np.multiply(self.dict_window['window0']['actual_status'], 
-                        np.random.normal(1.225*0.001*0.1, 1e-6, n_units)), a_min=1e-6, a_max=0.01225) # 0.1L/s
-                        
-                ### update unixstart and unixend
-                self.dict_heater.update(
-                    make_schedule(unixtime=self.dict_common['unixtime'],
-                        current_task=self.dict_common['current_task'][self.dict_heater['schedule']].values,
-                        load_type_id=self.dict_startcode['heater'], # code for heaters
-                        unixstart=self.dict_heater['unixstart'],
-                        unixend=self.dict_heater['unixend'],
-                        schedule_skew=self.dict_heater['schedule_skew'])
-                    )
-                
-                ## update if connected
-                self.dict_heater.update(
-                    is_connected(unixtime=self.dict_common['unixtime'],
-                        unixstart=self.dict_heater['unixstart'],
-                        unixend=self.dict_heater['unixend'])
-                    )
+                                       
                 
                 ### update device proposed mode, status, priority, and demand
-                self.dict_heater.update(
-                    device_heating_resistance(mode=self.dict_heater['mode'],
-                        temp_in=self.dict_heater['temp_in'], 
-                        temp_min=self.dict_heater['temp_min'], 
-                        temp_max=self.dict_heater['temp_max'], 
-                        heating_setpoint=self.dict_heater['heating_setpoint'], 
-                        tolerance=self.dict_heater['tolerance'], 
-                        heating_power=self.dict_heater['heating_power'],
-                        cop=self.dict_heater['cop'],
-                        standby_power=self.dict_heater['standby_power'],
-                        ventilation_power=self.dict_heater['ventilation_power'],
-                        proposed_status=self.dict_heater['proposed_status'],
-                        actual_status=self.dict_heater['actual_status'],
-                        tcl_control=self.dict_common['tcl_control'])
-                    )
-                
+                device_tcl(self.dict_heater, self.dict_common, inverter=False)
+
                 ### update ldc_dongle approval for the proposed status and demand
-                self.dict_heater.update(ldc_dongle(self.dict_heater, self.dict_common))
+                ldc_dongle(self.dict_heater, self.dict_common)
+
+                ### send data to main  
+                self.pipe_agg_heater1.send(self.dict_heater)
                 
                 ### update weather
                 self.dict_heater['temp_out'] = np.add(np.random.normal(0, 0.01, n_units), self.dict_common['temp_out'])
@@ -1136,32 +1112,21 @@ class Aggregator(multiprocessing.Process):
                     wall_area=self.dict_heater['wall_area'], 
                     window_area=self.dict_heater['window_area'], 
                     skylight_area=self.dict_heater['skylight_area']))
-                ### update heat from all sources
-                self.dict_heater.update(sum_heat_sources(solar_heat=self.dict_heater['solar_heat'], 
-                    heating_power_thermal=self.dict_heater['heating_power_thermal'], 
-                    cooling_power_thermal=self.dict_heater['cooling_power_thermal']))
 
+                
+                ### update mass_flow, air density = 1.225 kg/m^3 at 15 degC 101.325kPa (sea level)
+                self.dict_heater['mass_flow'] = np.clip(np.multiply(self.dict_window['window0']['actual_status'], 
+                        np.random.normal(1.225*0.001*0.1, 1e-6, n_units)), a_min=1e-6, a_max=0.01225) # 0.1L/s
+                
                 ### update device states, e.g., temp_in, temp_mat, through simulation
-                self.dict_heater.update(
-                    enduse_tcl(
-                        heat_all=self.dict_heater['heat_all'],
-                        temp_in=self.dict_heater['temp_in'],
-                        temp_out=self.dict_heater['temp_out'],
-                        temp_fill=self.dict_heater['temp_out'],
-                        Ua=self.dict_heater['Ua'],
-                        Cp=self.dict_heater['Cp'],
-                        Ca=self.dict_heater['Ca'],
-                        mass_flow= self.dict_heater['mass_flow'],
-                        step_size=self.dict_common['step_size'],
-                        )
-                    )
+                enduse_tcl(self.dict_heater)
+                
 
                 
                 ### temporary calculation for indoor humidity
                 self.dict_heater['humidity_in'] = np.random.normal(1, 0.001, len(self.dict_heater['temp_in'])) * self.dict_common['humidity'] 
 
-                ### send data to main  
-                self.pipe_agg_heater1.send(self.dict_heater)
+                
 
                 ### save data
                 if self.simulation and self.save_history:
@@ -1169,9 +1134,11 @@ class Aggregator(multiprocessing.Process):
                         dict_save.update(prepare_summary(states=self.dict_heater, common=self.dict_common))
                     else:
                         dict_save.update(prepare_data(states=self.dict_heater, common=self.dict_common))
-                    if (len(dict_save.keys())>=self.save_interval) and (self.case!=None):
+                    
+                    if (self.dict_common['unixtime']-self.start_unixtime)>=self.save_interval and (self.case!=None):
                         dict_save = save_data(dict_save, case=self.case,  folder=self.casefolder, filename='heater.h5', summary=self.summary)
-                
+                        self.start_unixtime = self.dict_common['unixtime']
+
                 # to give way to other threads
                 time.sleep(self.pause)  
             except Exception as e:
@@ -1185,11 +1152,19 @@ class Aggregator(multiprocessing.Process):
 
     def waterheater(self):
         # print('Running waterheater...')
-        self.dict_waterheater.update(initialize_load(load_type='waterheater', 
-            dict_devices=self.dict_devices,
-            dict_house=self.dict_house, 
-            idx=self.idx, distribution=self.distribution))
+        self.dict_waterheater.update(
+            initialize_load(
+                load_type='waterheater', 
+                dict_devices=self.dict_devices,
+                dict_house=self.dict_house, 
+                idx=self.idx, 
+                distribution=self.distribution,
+                common=self.dict_common,
+                )
+            )
         
+        self.save_interval += np.random.randint(0,60)
+
         ip = f"{'.'.join(self.local_ip.split('.')[:-1])}.113"
         port = 17001
         timeout = 0.2
@@ -1219,7 +1194,10 @@ class Aggregator(multiprocessing.Process):
                 self.dict_common.update(self.pipe_agg_waterheater1.recv())
                 if self.dict_common['is_alive']==False: 
                     raise KeyboardInterrupt
-
+                
+                ### update common variables
+                update_from_common(self.dict_waterheater, self.dict_common)
+                
                 ### update weather
                 self.dict_waterheater['temp_out'] = np.add(np.random.normal(0,0.01,n_units), self.dict_common['temp_out'])
                 
@@ -1231,46 +1209,24 @@ class Aggregator(multiprocessing.Process):
                     dict_parent=self.dict_waterheater, 
                     dict_common=self.dict_common))
 
+                
+                ### update device proposed mode, status, priority, and demand
+                device_tcl(self.dict_waterheater, self.dict_common, inverter=False)
+
+                ### update ldc_dongle approval for the proposed status and demand
+                ldc_dongle(self.dict_waterheater, self.dict_common)
+
+                ### send data to main
+                self.pipe_agg_waterheater1.send(self.dict_waterheater)
+                
                 ### update mass_flow, water density = 999.1 kg/m^3 (or 0.999 kg/liter) at 15 degC 101.325kPa (sea level)
                 self.dict_waterheater['mass_flow'] = np.multiply(self.dict_valve['valve0']['actual_status'], 
                         np.clip(np.random.normal(999.1*0.001*0.1, 0.01, n_units), a_min=0.01, a_max=0.25))  # assumed 0.1 L/s
                 # self.dict_waterheater['mass_flow'] = np.add(self.dict_waterheater['mass_flow'], np.random.choice([0, 0.01], n_units, p=[0.9, 0.1]))
                 
-                ### update device proposed mode, status, priority, and demand
-                self.dict_waterheater.update(
-                    device_heating_resistance(mode=self.dict_waterheater['mode'],
-                        temp_in=self.dict_waterheater['temp_in'], 
-                        temp_min=self.dict_waterheater['temp_min'], 
-                        temp_max=self.dict_waterheater['temp_max'], 
-                        heating_setpoint=self.dict_waterheater['heating_setpoint'], 
-                        tolerance=self.dict_waterheater['tolerance'], 
-                        heating_power=self.dict_waterheater['heating_power'],
-                        cop=self.dict_waterheater['cop'],
-                        standby_power=self.dict_waterheater['standby_power'],
-                        ventilation_power=self.dict_waterheater['ventilation_power'],
-                        proposed_status=self.dict_waterheater['proposed_status'],
-                        actual_status=self.dict_waterheater['actual_status'],
-                        tcl_control=self.dict_common['tcl_control'])
-                    )
-
-                ### update ldc_dongle approval for the proposed status and demand
-                self.dict_waterheater.update(ldc_dongle(self.dict_waterheater, self.dict_common))
-                
                 ### update device states, e.g., temp_in, temp_mat, through simulation
-                self.dict_waterheater['heat_all'] = self.dict_waterheater['heating_power_thermal']
-                self.dict_waterheater.update(
-                    enduse_tcl(
-                        heat_all=self.dict_waterheater['heat_all'],
-                        temp_in=self.dict_waterheater['temp_in'],
-                        temp_out=self.dict_waterheater['temp_out'],
-                        temp_fill=self.dict_waterheater['temp_out'],
-                        Ua=self.dict_waterheater['Ua'],
-                        Cp=self.dict_waterheater['Cp'],
-                        Ca=self.dict_waterheater['Ca'],
-                        mass_flow=self.dict_waterheater['mass_flow'],
-                        step_size=self.dict_common['step_size'],
-                        )
-                    )
+                enduse_tcl(self.dict_waterheater)
+                    
 
 
                 ### get actual readings
@@ -1282,8 +1238,7 @@ class Aggregator(multiprocessing.Process):
                     execute_state(int(self.dict_waterheater['actual_status'][0]), device_id=self.device_ip, report=True)
                     time.sleep(1)
 
-                ### send data to main
-                self.pipe_agg_waterheater1.send(self.dict_waterheater)
+                
                                         
                 ### save data
                 if self.simulation and self.save_history:
@@ -1293,8 +1248,9 @@ class Aggregator(multiprocessing.Process):
                     else:
                         dict_save.update(prepare_data(states=self.dict_waterheater, common=self.dict_common))
 
-                    if (len(dict_save.keys())>=self.save_interval) and (self.case!=None):
+                    if (self.dict_common['unixtime']-self.start_unixtime)>=self.save_interval and (self.case!=None):
                         dict_save = save_data(dict_save, case=self.case,  folder=self.casefolder, filename='waterheater.h5', summary=self.summary)
+                        self.start_unixtime = self.dict_common['unixtime']
 
                 time.sleep(self.pause) # to give way to other threads
             except Exception as e:
@@ -1310,10 +1266,18 @@ class Aggregator(multiprocessing.Process):
 
     def fridge(self):
         # print('Running fridge...')
-        self.dict_fridge.update(initialize_load(load_type='fridge', 
-            dict_devices=self.dict_devices,
-            dict_house=self.dict_house, 
-            idx=self.idx, distribution=self.distribution))
+        self.dict_fridge.update(
+            initialize_load(
+                load_type='fridge', 
+                dict_devices=self.dict_devices,
+                dict_house=self.dict_house, 
+                idx=self.idx, 
+                distribution=self.distribution,
+                common=self.dict_common,
+                )
+            )
+
+        self.save_interval += np.random.randint(0,60)
 
         dict_save = {}    
 
@@ -1323,46 +1287,22 @@ class Aggregator(multiprocessing.Process):
                 if self.dict_common['is_alive']==False:
                     raise KeyboardInterrupt
 
+                ### update common variables
+                update_from_common(self.dict_fridge, self.dict_common)
+                
                 ### update device proposed mode, status, priority, and demand
-                self.dict_fridge.update(
-                    device_cooling_compression(mode=self.dict_fridge['mode'],
-                        temp_in=self.dict_fridge['temp_in'], 
-                        temp_min=self.dict_fridge['temp_min'], 
-                        temp_max=self.dict_fridge['temp_max'], 
-                        temp_target=self.dict_fridge['temp_target'], 
-                        tolerance=self.dict_fridge['tolerance'], 
-                        cooling_power=self.dict_fridge['cooling_power'],
-                        cop=self.dict_fridge['cop'], 
-                        standby_power=self.dict_fridge['standby_power'],
-                        ventilation_power=self.dict_fridge['ventilation_power'],
-                        proposed_status=self.dict_fridge['proposed_status'],
-                        actual_status=self.dict_fridge['actual_status'],
-                        tcl_control=self.dict_common['tcl_control'])
-                    )
+                device_tcl(self.dict_fridge, self.dict_common, inverter=False)
 
                 ### update ldc_dongle approval for the proposed status and demand
-                self.dict_fridge.update(ldc_dongle(self.dict_fridge, self.dict_common))
-                
-                ### update device states, e.g., temp_in, temp_mat, through simulation
-                self.dict_fridge['mass_flow'] = np.clip(np.random.normal(1.2041e-6, 1e-10, self.dict_devices['fridge']['n_units']), a_min=0, a_max=1.2041e-5) #1.2041*0.001*0.001*np.random.choice([0.01,1], self.dict_devices['fridge']['n_units'], p=[0.9,0.1]), # 10mL/s
-                self.dict_fridge['heat_all'] = self.dict_fridge['cooling_power_thermal']
-                self.dict_fridge.update(
-                    enduse_tcl(
-                        heat_all=self.dict_fridge['heat_all'],
-                        temp_in=self.dict_fridge['temp_in'],
-                        temp_out=self.dict_fridge['temp_out'],
-                        temp_fill=self.dict_fridge['temp_out'],
-                        Ua=self.dict_fridge['Ua'],
-                        Cp=self.dict_fridge['Cp'],
-                        Ca=self.dict_fridge['Ca'],
-                        mass_flow=self.dict_fridge['mass_flow'],
-                        step_size=self.dict_common['step_size'],
-                        )
-                    )
-
+                ldc_dongle(self.dict_fridge, self.dict_common)
 
                 ### send data to main
                 self.pipe_agg_fridge1.send(self.dict_fridge)
+                
+                ### update device states, e.g., temp_in, temp_mat, through simulation
+                self.dict_fridge['mass_flow'] = np.clip(np.random.normal(1.2041e-6, 1e-10, self.dict_devices['fridge']['n_units']), a_min=0, a_max=1.2041e-5) #1.2041*0.001*0.001*np.random.choice([0.01,1], self.dict_devices['fridge']['n_units'], p=[0.9,0.1]), # 10mL/s
+                enduse_tcl(self.dict_fridge)
+                    
                 
                 ### save data
                 if self.simulation and self.save_history:
@@ -1370,9 +1310,11 @@ class Aggregator(multiprocessing.Process):
                         dict_save.update(prepare_summary(states=self.dict_fridge, common=self.dict_common))
                     else:
                         dict_save.update(prepare_data(states=self.dict_fridge, common=self.dict_common))
-                    if (len(dict_save.keys())>=self.save_interval) and (self.case!=None):
-                            dict_save = save_data(dict_save, case=self.case,  folder=self.casefolder, filename='fridge.h5', summary=self.summary)
-            
+                    
+                    if (self.dict_common['unixtime']-self.start_unixtime)>=self.save_interval and (self.case!=None):
+                        dict_save = save_data(dict_save, case=self.case,  folder=self.casefolder, filename='fridge.h5', summary=self.summary)
+                        self.start_unixtime = self.dict_common['unixtime']
+
                 time.sleep(self.pause)  # to give way to other threads
             except Exception as e:
                 print(f'Error AGGREGATOR.fridge:{e}')
@@ -1388,56 +1330,43 @@ class Aggregator(multiprocessing.Process):
     def freezer(self):
         # print('Running freezer...')
         dict_save = {}
-        self.dict_freezer.update(initialize_load(load_type='freezer', 
-            dict_devices=self.dict_devices,
-            dict_house=self.dict_house, 
-            idx=self.idx, distribution=self.distribution))
+        self.dict_freezer.update(
+            initialize_load(
+                load_type='freezer', 
+                dict_devices=self.dict_devices,
+                dict_house=self.dict_house, 
+                idx=self.idx, 
+                distribution=self.distribution,
+                common=self.dict_common,
+                )
+            )
         
+        self.save_interval += np.random.randint(0,60)
+
         while True:
             try:
                 self.dict_common.update(self.pipe_agg_freezer1.recv())
                 if self.dict_common['is_alive']==False:
                     raise KeyboardInterrupt
 
+                ### update common variables
+                update_from_common(self.dict_freezer, self.dict_common)
+                
                 ### update device proposed mode, status, priority, and demand
-                self.dict_freezer.update(
-                    device_cooling_compression(mode=self.dict_freezer['mode'],
-                        temp_in=self.dict_freezer['temp_in'], 
-                        temp_min=self.dict_freezer['temp_min'], 
-                        temp_max=self.dict_freezer['temp_max'], 
-                        temp_target=self.dict_freezer['temp_target'], 
-                        tolerance=self.dict_freezer['tolerance'], 
-                        cooling_power=self.dict_freezer['cooling_power'],
-                        cop=self.dict_freezer['cop'],
-                        standby_power=self.dict_freezer['standby_power'],
-                        ventilation_power=self.dict_freezer['ventilation_power'],
-                        proposed_status=self.dict_freezer['proposed_status'],
-                        actual_status=self.dict_freezer['actual_status'],
-                        tcl_control=self.dict_common['tcl_control'])
-                    )
+                device_tcl(self.dict_freezer, self.dict_common, inverter=False)
 
                 ### update ldc_dongle approval for the proposed status and demand
-                self.dict_freezer.update(ldc_dongle(self.dict_freezer, self.dict_common))
+                ldc_dongle(self.dict_freezer, self.dict_common)
+
+                ### send data to main
+                self.pipe_agg_freezer1.send(self.dict_freezer) 
                 
                 ### update device states, e.g., temp_in, temp_mat, through simulation
                 self.dict_freezer['mass_flow'] = np.clip(np.random.normal(1.2041e-6, 1e-10, self.dict_devices['freezer']['n_units']), a_min=0, a_max=1.2041e-5) #1.2041*0.001*0.001*np.random.choice([0.01,1], self.dict_devices['freezer']['n_units'], p=[0.9,0.1]), # 10mL/s
-                self.dict_freezer['heat_all'] = self.dict_freezer['cooling_power_thermal']
-                self.dict_freezer.update(
-                    enduse_tcl(
-                        heat_all=self.dict_freezer['heat_all'],
-                        temp_in=self.dict_freezer['temp_in'],
-                        temp_out=self.dict_freezer['temp_out'],
-                        temp_fill=self.dict_freezer['temp_out'],
-                        Ua=self.dict_freezer['Ua'],
-                        Cp=self.dict_freezer['Cp'],
-                        Ca=self.dict_freezer['Ca'],
-                        mass_flow=self.dict_freezer['mass_flow'],
-                        step_size=self.dict_common['step_size'],
-                        )
-                    )
+                enduse_tcl(self.dict_freezer)
+                    
 
-                ### send data to main
-                self.pipe_agg_freezer1.send(self.dict_freezer)  
+                 
                 
                 ### save data
                 if self.simulation and self.save_history:
@@ -1446,9 +1375,10 @@ class Aggregator(multiprocessing.Process):
                     else:
                         dict_save.update(prepare_data(states=self.dict_freezer, common=self.dict_common))
 
-                    if (len(dict_save.keys())>=self.save_interval) and (self.case!=None):
+                    if (self.dict_common['unixtime']-self.start_unixtime)>=self.save_interval and (self.case!=None):
                         dict_save = save_data(dict_save, case=self.case, folder=self.casefolder, filename='freezer.h5', summary=self.summary)
-                    
+                        self.start_unixtime = self.dict_common['unixtime']
+
                 time.sleep(self.pause)  # to give way to other threads
             except Exception as e:
                 print(f'Error freezer:{e}')
@@ -1461,10 +1391,18 @@ class Aggregator(multiprocessing.Process):
 
     def clotheswasher(self):
         # print('Running clotheswasher...')
-        self.dict_clotheswasher.update(initialize_load(load_type='clotheswasher', 
-            dict_devices=self.dict_devices,
-            dict_house=self.dict_house, 
-            idx=self.idx, distribution=self.distribution))
+        self.dict_clotheswasher.update(
+            initialize_load(
+                load_type='clotheswasher', 
+                dict_devices=self.dict_devices,
+                dict_house=self.dict_house, 
+                idx=self.idx, 
+                distribution=self.distribution,
+                common=self.dict_common,
+                )
+            )
+
+        self.save_interval += np.random.randint(0,60)
 
         ### setup the profiles
         try:
@@ -1483,54 +1421,25 @@ class Aggregator(multiprocessing.Process):
                 self.dict_common.update(self.pipe_agg_clotheswasher1.recv())
                 if self.dict_common['is_alive']==False:
                     raise KeyboardInterrupt
-
-                ### update unixstart and unixend
-                self.dict_clotheswasher.update(
-                    make_schedule(unixtime=self.dict_common['unixtime'],
-                        current_task=self.dict_common['current_task'][self.dict_clotheswasher['schedule']].values,
-                        load_type_id=self.dict_startcode['clotheswasher'], 
-                        unixstart=self.dict_clotheswasher['unixstart'],
-                        unixend=self.dict_clotheswasher['unixend'],
-                        schedule_skew=self.dict_clotheswasher['schedule_skew'])
-                    )
-
-                ## update if connected
-                self.dict_clotheswasher.update(
-                    is_connected(unixtime=self.dict_common['unixtime'],
-                        unixstart=self.dict_clotheswasher['unixstart'],
-                        unixend=self.dict_clotheswasher['unixend'])
-                    )
+                
+                ### update common variables
+                update_from_common(self.dict_clotheswasher, self.dict_common)
+                
+                ### update schedules
+                update_schedules(self.dict_clotheswasher, self.dict_common)
 
                 ### update device proposed mode, status, priority, and demand
-                self.dict_clotheswasher.update(
-                    device_ntcl(len_profile=self.dict_clotheswasher['len_profile'],
-                        unixtime=self.dict_common['unixtime'], 
-                        unixstart=self.dict_clotheswasher['unixstart'],
-                        unixend=self.dict_clotheswasher['unixend'],
-                        connected=self.dict_clotheswasher['connected'],
-                        progress=self.dict_clotheswasher['progress'],
-                        actual_status=self.dict_clotheswasher['actual_status'],
-                        # proposed_demand=np.array([np.interp(x*y, np.arange(y), dict_data[k]) for k, x, y in zip(self.dict_clotheswasher['profile'], self.dict_clotheswasher['len_profile'], self.dict_clotheswasher['progress'])]).flatten()
-                        proposed_demand=np.array([dict_data[k][int((x*y)%x)] for k, x, y in zip(self.dict_clotheswasher['profile'], self.dict_clotheswasher['len_profile'], self.dict_clotheswasher['progress'])]).flatten()
-                        )
-                    )
+                device_ntcl(self.dict_clotheswasher, dict_data)
 
                 ### update ldc_dongle approval for the proposed status and demand
-                self.dict_clotheswasher.update(ldc_dongle(self.dict_clotheswasher, self.dict_common))
-                
-                ### update device states, e.g., temp_in, temp_mat, progress, soc, through simulation
-                self.dict_clotheswasher.update(
-                    enduse_ntcl(len_profile=self.dict_clotheswasher['len_profile'],
-                        progress=self.dict_clotheswasher['progress'],
-                        step_size=self.dict_common['step_size'],
-                        actual_status=self.dict_clotheswasher['actual_status'],
-                        unixtime=self.dict_common['unixtime'],
-                        connected=self.dict_clotheswasher['connected'])
-                    )
-
+                ldc_dongle(self.dict_clotheswasher, self.dict_common)
                 
                 ### send data to main
                 self.pipe_agg_clotheswasher1.send(self.dict_clotheswasher)
+                
+                ### update device states, e.g., temp_in, temp_mat, progress, soc, through simulation
+                enduse_ntcl(self.dict_clotheswasher)
+
                 
                 ### save data
                 if self.simulation and self.save_history:
@@ -1539,9 +1448,10 @@ class Aggregator(multiprocessing.Process):
                     else:
                         dict_save.update(prepare_data(states=self.dict_clotheswasher, common=self.dict_common))
 
-                    if (len(dict_save.keys())>=self.save_interval) and (self.case!=None):
+                    if (self.dict_common['unixtime']-self.start_unixtime)>=self.save_interval and (self.case!=None):
                         dict_save = save_data(dict_save, case=self.case,  folder=self.casefolder, filename='clotheswasher.h5', summary=self.summary)
-                
+                        self.start_unixtime = self.dict_common['unixtime']
+
                 time.sleep(self.pause)
             except Exception as e:
                 print(f'Error clotheswasher run:{e}')
@@ -1563,10 +1473,18 @@ class Aggregator(multiprocessing.Process):
 
     def clothesdryer(self):
         # print('Running clothesdryer...')
-        self.dict_clothesdryer.update(initialize_load(load_type='clothesdryer', 
-            dict_devices=self.dict_devices,
-            dict_house=self.dict_house, 
-            idx=self.idx, distribution=self.distribution))
+        self.dict_clothesdryer.update(
+            initialize_load(
+                load_type='clothesdryer', 
+                dict_devices=self.dict_devices,
+                dict_house=self.dict_house, 
+                idx=self.idx, 
+                distribution=self.distribution,
+                common=self.dict_common,
+                )
+            )
+
+        self.save_interval += np.random.randint(0,60)
 
         ### setup the profiles
         try:
@@ -1586,54 +1504,26 @@ class Aggregator(multiprocessing.Process):
                 self.dict_common.update(self.pipe_agg_clothesdryer1.recv())
                 if self.dict_common['is_alive']==False:
                     raise KeyboardInterrupt 
-
-                ### update unixstart and unixend
-                self.dict_clothesdryer.update(
-                    make_schedule(unixtime=self.dict_common['unixtime'],
-                        current_task=self.dict_common['current_task'][self.dict_clothesdryer['schedule']].values,
-                        load_type_id=self.dict_startcode['clothesdryer'],
-                        unixstart=self.dict_clothesdryer['unixstart'],
-                        unixend=self.dict_clothesdryer['unixend'],
-                        schedule_skew=self.dict_clothesdryer['schedule_skew'])
-                    )
-
-                ### update if connected
-                self.dict_clothesdryer.update(
-                    is_connected(unixtime=self.dict_common['unixtime'],
-                        unixstart=self.dict_clothesdryer['unixstart'],
-                        unixend=self.dict_clothesdryer['unixend'])
-                    )
+                
+                ### update common variables
+                update_from_common(self.dict_clothesdryer, self.dict_common)
+                
+                ### update schedules
+                update_schedules(self.dict_clothesdryer, self.dict_common)
 
                 ### update device proposed mode, status, priority, and demand
-                self.dict_clothesdryer.update(
-                    device_ntcl(len_profile=self.dict_clothesdryer['len_profile'],
-                        unixtime=self.dict_common['unixtime'], 
-                        unixstart=self.dict_clothesdryer['unixstart'],
-                        unixend=self.dict_clothesdryer['unixend'],
-                        connected=self.dict_clothesdryer['connected'],
-                        progress=self.dict_clothesdryer['progress'],
-                        actual_status=self.dict_clothesdryer['actual_status'],
-                        proposed_demand=np.array([dict_data[k][int((x*y)%x)] for k, x, y in zip(self.dict_clothesdryer['profile'], self.dict_clothesdryer['len_profile'], self.dict_clothesdryer['progress'])]).flatten()
-                        )
-                    )
+                device_ntcl(self.dict_clothesdryer, dict_data)
 
                 ### update ldc_dongle approval for the proposed status and demand
-                self.dict_clothesdryer.update(ldc_dongle(self.dict_clothesdryer, self.dict_common))
+                ldc_dongle(self.dict_clothesdryer, self.dict_common)
                 
-                ### update device states, e.g., temp_in, temp_mat, progress, soc, through simulation
-                self.dict_clothesdryer.update(
-                    enduse_ntcl(len_profile=self.dict_clothesdryer['len_profile'],
-                        progress=self.dict_clothesdryer['progress'],
-                        step_size=self.dict_common['step_size'],
-                        actual_status=self.dict_clothesdryer['actual_status'],
-                        unixtime=self.dict_common['unixtime'],
-                        connected=self.dict_clothesdryer['connected'])
-                    )
-                
-
                 ### send data to main
                 self.pipe_agg_clothesdryer1.send(self.dict_clothesdryer)
 
+                ### update device states, e.g., temp_in, temp_mat, progress, soc, through simulation
+                enduse_ntcl(self.dict_clothesdryer)
+
+                
                 ### save data
                 if self.simulation and self.save_history:
                     if self.summary:
@@ -1641,9 +1531,10 @@ class Aggregator(multiprocessing.Process):
                     else:
                         dict_save.update(prepare_data(states=self.dict_clothesdryer, common=self.dict_common))
 
-                    if (len(dict_save.keys())>=self.save_interval) and (self.case!=None):
+                    if (self.dict_common['unixtime']-self.start_unixtime)>=self.save_interval and (self.case!=None):
                         dict_save = save_data(dict_save, case=self.case,  folder=self.casefolder, filename='clothesdryer.h5', summary=self.summary)
-                
+                        self.start_unixtime = self.dict_common['unixtime']
+
                 time.sleep(self.pause)
             except Exception as e:
                 print(f'Error clothesdryer run:{e}')
@@ -1658,10 +1549,17 @@ class Aggregator(multiprocessing.Process):
 
     def dishwasher(self):
         # print('Running dishwasher...')
-        self.dict_dishwasher.update(initialize_load(load_type='dishwasher', 
-            dict_devices=self.dict_devices,
-            dict_house=self.dict_house, 
-            idx=self.idx, distribution=self.distribution))
+        self.dict_dishwasher.update(
+            initialize_load(
+                load_type='dishwasher', 
+                dict_devices=self.dict_devices,
+                dict_house=self.dict_house, 
+                idx=self.idx, 
+                distribution=self.distribution,
+                common=self.dict_common,
+                )
+            )
+        self.save_interval += np.random.randint(0,60)
 
         ### setup the profiles
         try:
@@ -1681,53 +1579,26 @@ class Aggregator(multiprocessing.Process):
                 self.dict_common.update(self.pipe_agg_dishwasher1.recv())
                 if self.dict_common['is_alive']==False:
                     raise KeyboardInterrupt
+                
+                ### update common variables
+                update_from_common(self.dict_dishwasher, self.dict_common)
 
-                ### update unixstart and unixend
-                self.dict_dishwasher.update(
-                    make_schedule(unixtime=self.dict_common['unixtime'],
-                        current_task=self.dict_common['current_task'][self.dict_dishwasher['schedule']].values,
-                        load_type_id=self.dict_startcode['dishwasher'],
-                        unixstart=self.dict_dishwasher['unixstart'],
-                        unixend=self.dict_dishwasher['unixend'],
-                        schedule_skew=self.dict_dishwasher['schedule_skew'])
-                    )
-
-                ## update if connected
-                self.dict_dishwasher.update(
-                    is_connected(unixtime=self.dict_common['unixtime'],
-                        unixstart=self.dict_dishwasher['unixstart'],
-                        unixend=self.dict_dishwasher['unixend'])
-                    )
+                ### update schedules
+                update_schedules(self.dict_dishwasher, self.dict_common)
 
                 ### update device proposed mode, status, priority, and demand
-                self.dict_dishwasher.update(
-                    device_ntcl(len_profile=self.dict_dishwasher['len_profile'],
-                        unixtime=self.dict_common['unixtime'], 
-                        unixstart=self.dict_dishwasher['unixstart'],
-                        unixend=self.dict_dishwasher['unixend'],
-                        connected=self.dict_dishwasher['connected'],
-                        progress=self.dict_dishwasher['progress'],
-                        actual_status=self.dict_dishwasher['actual_status'],
-                        proposed_demand=np.array([dict_data[k][int((x*y)%x)] for k, x, y in zip(self.dict_dishwasher['profile'], self.dict_dishwasher['len_profile'], self.dict_dishwasher['progress'])]).flatten(),
-                        )
-                    )
+                device_ntcl(self.dict_dishwasher, dict_data)
 
                 ### update ldc_dongle approval for the proposed status and demand
-                self.dict_dishwasher.update(ldc_dongle(self.dict_dishwasher, self.dict_common))
+                ldc_dongle(self.dict_dishwasher, self.dict_common)
                 
-                ### update device states, e.g., temp_in, temp_mat, progress, soc, through simulation
-                self.dict_dishwasher.update(
-                    enduse_ntcl(len_profile=self.dict_dishwasher['len_profile'],
-                        progress=self.dict_dishwasher['progress'],
-                        step_size=self.dict_common['step_size'],
-                        actual_status=self.dict_dishwasher['actual_status'],
-                        unixtime=self.dict_common['unixtime'],
-                        connected=self.dict_dishwasher['connected'])
-                    )
-
                 ### send data to main
                 self.pipe_agg_dishwasher1.send(self.dict_dishwasher)
 
+                ### update device states, e.g., temp_in, temp_mat, progress, soc, through simulation
+                enduse_ntcl(self.dict_dishwasher)
+
+                
                 ### save data
                 if self.simulation and self.save_history:
                     if self.summary:
@@ -1735,9 +1606,10 @@ class Aggregator(multiprocessing.Process):
                     else:
                         dict_save.update(prepare_data(states=self.dict_dishwasher, common=self.dict_common))
 
-                    if (len(dict_save.keys())>=self.save_interval) and (self.case!=None):
+                    if (self.dict_common['unixtime']-self.start_unixtime)>=self.save_interval and (self.case!=None):
                         dict_save = save_data(dict_save, case=self.case,  folder=self.casefolder, filename='dishwasher.h5', summary=self.summary)
-                    
+                        self.start_unixtime = self.dict_common['unixtime']
+
                 time.sleep(self.pause)
             except Exception as e:
                 print(f'Error dishwasher run:{e}')
@@ -1751,11 +1623,17 @@ class Aggregator(multiprocessing.Process):
 
     def ev(self):
         # print('Running electric vehicle model...')
-        self.dict_ev.update(initialize_load(load_type='ev', 
-            dict_devices=self.dict_devices,
-            dict_house=self.dict_house, 
-            idx=self.idx, distribution=self.distribution))
-        
+        self.dict_ev.update(
+            initialize_load(
+                load_type='ev', 
+                dict_devices=self.dict_devices,
+                dict_house=self.dict_house, 
+                idx=self.idx, 
+                distribution=self.distribution,
+                common=self.dict_common,
+                )
+            )
+        self.save_interval += np.random.randint(0,60)
         ### setup the profiles
         try:
             with pd.HDFStore('/home/pi/ldc_project/ldc_simulator/profiles/ev_battery.h5', 'r') as store:
@@ -1763,76 +1641,35 @@ class Aggregator(multiprocessing.Process):
         except Exception as e:
             print(f'Error electric_vehicle setup:{e}')
 
+        n_units = self.dict_devices['ev']['n_units']
         dict_save = {}
         ### run profiles
         while True:
             try:
                 self.dict_common.update(self.pipe_agg_ev1.recv())
+                self.dict_ev['unixtime'] = np.ones(n_units)*self.dict_common['unixtime']
                 if self.dict_common['is_alive']==False:
                     raise KeyboardInterrupt 
-
-                ### update unixstart and unixend
-                self.dict_ev.update(
-                    make_schedule(unixtime=self.dict_common['unixtime'],
-                        current_task=self.dict_common['current_task'][self.dict_ev['schedule']].values,
-                        load_type_id=self.dict_startcode['ev'], 
-                        unixstart=self.dict_ev['unixstart'],
-                        unixend=self.dict_ev['unixend'],
-                        schedule_skew=self.dict_ev['schedule_skew'])
-                    )
-
-                ### update if connected
-                self.dict_ev.update(
-                    is_connected(unixtime=self.dict_common['unixtime'],
-                        unixstart=self.dict_ev['unixstart'],
-                        unixend=self.dict_ev['unixend'])
-                    )
+                
+                ### update common variables
+                update_from_common(self.dict_ev, self.dict_common)
+                
+                ### update schedules
+                update_schedules(self.dict_ev, self.dict_common)
 
                 ### update device proposed mode, status, priority, and demand
-                self.dict_ev.update(
-                    device_battery(unixtime=self.dict_common['unixtime'], 
-                        unixstart=self.dict_ev['unixstart'],
-                        unixend=self.dict_ev['unixend'],
-                        soc=self.dict_ev['soc'],
-                        charging_power=self.dict_ev['charging_power'],
-                        target_soc=self.dict_ev['target_soc'],
-                        capacity=self.dict_ev['capacity'],
-                        connected=self.dict_ev['connected'],
-                        progress=self.dict_ev['progress'],
-                        actual_status=self.dict_ev['actual_status'],
-                        proposed_demand=self.dict_ev['proposed_demand'])
-
-                    # device_charger_ev(unixtime=self.dict_ev['unixtime'], 
-                    #   unixstart=self.dict_ev['unixstart'],
-                    #   unixend=self.dict_ev['unixend'],
-                    #   soc=self.dict_ev['soc'],
-                    #   charging_power=self.dict_ev['charging_power'],
-                    #   target_soc=self.dict_ev['target_soc'],
-                    #   capacity=self.dict_ev['capacity'],
-                    #   connected=self.dict_ev['connected'],
-                    #   progress=self.dict_ev['progress'],
-                    #   actual_status=self.dict_ev['actual_status'])
-                    #   proposed_demand=np.diag(df.loc[self.dict_ev['soc'].round(3), self.dict_ev['profile']].interpolate()),
-                    )
+                device_battery(self.dict_ev)
 
                 ### update ldc_dongle approval for the proposed status and demand
-                self.dict_ev.update(ldc_dongle(self.dict_ev, self.dict_common))
+                ldc_dongle(self.dict_ev, self.dict_common)
                 
-                ### update device states, e.g., temp_in, temp_mat, progress, soc, through simulation
-                self.dict_ev.update(
-                    enduse_ev(soc=self.dict_ev['soc'],
-                        target_soc=self.dict_ev['target_soc'],
-                        capacity=self.dict_ev['capacity'],
-                        actual_demand=self.dict_ev['actual_demand'],
-                        connected=self.dict_ev['connected'],
-                        unixtime=self.dict_common['unixtime'],
-                        step_size=self.dict_common['step_size'])
-                    )
-                
-
                 ### send data to main
                 self.pipe_agg_ev1.send(self.dict_ev)
 
+                ### update device states, e.g., temp_in, temp_mat, progress, soc, through simulation
+                enduse_battery(self.dict_ev)
+                
+                
                 ### save data
                 if self.simulation and self.save_history:
                     if self.summary:
@@ -1840,9 +1677,10 @@ class Aggregator(multiprocessing.Process):
                     else:
                         dict_save.update(prepare_data(states=self.dict_ev, common=self.dict_common))
 
-                    if (len(dict_save.keys())>=self.save_interval) and (self.case!=None):
+                    if (self.dict_common['unixtime']-self.start_unixtime)>=self.save_interval and (self.case!=None):
                         dict_save = save_data(dict_save, case=self.case,  folder=self.casefolder, filename='ev.h5', summary=self.summary)
-                    
+                        self.start_unixtime = self.dict_common['unixtime']
+
                 time.sleep(self.pause)
             except Exception as e:
                 print(f'Error ev run:{e}')
@@ -1856,77 +1694,41 @@ class Aggregator(multiprocessing.Process):
 
     def storage(self):
         # print('Running battery storage model...')
-        self.dict_storage.update(initialize_load(load_type='storage', 
-            dict_devices=self.dict_devices,
-            dict_house=self.dict_house, 
-            idx=self.idx, distribution=self.distribution))
-
+        self.dict_storage.update(
+            initialize_load(
+                load_type='storage', 
+                dict_devices=self.dict_devices,
+                dict_house=self.dict_house, 
+                idx=self.idx, 
+                distribution=self.distribution,
+                common=self.dict_common,
+                )
+            )
+        self.save_interval += np.random.randint(0,60)
         dict_save = {}
         while True:
             try:
                 self.dict_common.update(self.pipe_agg_storage1.recv())
                 if self.dict_common['is_alive']==False:
                     raise KeyboardInterrupt
-
-                ### update unixstart and unixend
-                self.dict_storage.update(
-                    make_schedule(unixtime=self.dict_common['unixtime'],
-                        current_task=self.dict_common['current_task'][self.dict_storage['schedule']].values,
-                        load_type_id=self.dict_startcode['storage'], 
-                        unixstart=self.dict_storage['unixstart'],
-                        unixend=self.dict_storage['unixend'],
-                        schedule_skew=self.dict_storage['schedule_skew'])
-                    )
-                ## update if connected
-                self.dict_storage.update(
-                    is_connected(unixtime=self.dict_common['unixtime'],
-                        unixstart=self.dict_storage['unixstart'],
-                        unixend=self.dict_storage['unixend'])
-                    )
+                
+                ### update common variables
+                update_from_common(self.dict_storage, self.dict_common)
+                
                 ### update device proposed mode, status, priority, and demand
-                self.dict_storage.update(
-                    device_battery(unixtime=self.dict_common['unixtime'], 
-                        unixstart=self.dict_storage['unixstart'],
-                        unixend=self.dict_storage['unixend'],
-                        soc=self.dict_storage['soc'],
-                        charging_power=self.dict_storage['charging_power'],
-                        target_soc=self.dict_storage['target_soc'],
-                        capacity=self.dict_storage['capacity'],
-                        connected=self.dict_storage['connected'],
-                        progress=self.dict_storage['progress'],
-                        actual_status=self.dict_storage['actual_status'],
-                        proposed_demand=self.dict_storage['proposed_demand'])
-
-                    # device_charger_storage(unixtime=self.dict_storage['unixtime'], 
-                    #   unixstart=self.dict_storage['unixstart'],
-                    #   unixend=self.dict_storage['unixend'],
-                    #   soc=self.dict_storage['soc'],
-                    #   charging_power=self.dict_storage['charging_power'],
-                    #   target_soc=self.dict_storage['target_soc'],
-                    #   capacity=self.dict_storage['capacity'],
-                    #   connected=self.dict_storage['connected'],
-                    #   progress=self.dict_storage['progress'],
-                    #   actual_status=self.dict_storage['actual_status'],
-                    #   proposed_demand=self.dict_storage['charging_power'])
-                    )
+                device_battery(self.dict_storage)
 
                 ### update ldc_dongle approval for the proposed status and demand
-                self.dict_storage.update(ldc_dongle(self.dict_storage, self.dict_common))
+                ldc_dongle(self.dict_storage, self.dict_common)
                 
-                ### update device states, e.g., temp_in, temp_mat, progress, soc, through simulation
-                self.dict_storage.update(
-                    enduse_storage(soc=self.dict_storage['soc'],
-                        target_soc=self.dict_storage['target_soc'],
-                        capacity=self.dict_storage['capacity'],
-                        actual_demand=self.dict_storage['actual_demand'],
-                        connected=self.dict_storage['connected'],
-                        unixtime=self.dict_common['unixtime'],
-                        step_size=self.dict_common['step_size'])
-                    )
-
                 ### send data to main
                 self.pipe_agg_storage1.send(self.dict_storage)
 
+                ### update device states, e.g., temp_in, temp_mat, progress, soc, through simulation
+                enduse_battery(self.dict_storage)
+                
+
+                
                 ### save data
                 if self.simulation and self.save_history:
                     if self.summary:
@@ -1934,9 +1736,10 @@ class Aggregator(multiprocessing.Process):
                     else:
                         dict_save.update(prepare_data(states=self.dict_storage, common=self.dict_common))
 
-                    if (len(dict_save.keys())>=self.save_interval) and (self.case!=None):
+                    if (self.dict_common['unixtime']-self.start_unixtime)>=self.save_interval and (self.case!=None):
                         dict_save = save_data(dict_save, case=self.case,  folder=self.casefolder, filename='storage.h5', summary=self.summary)
-                
+                        self.start_unixtime = self.dict_common['unixtime']
+
                 time.sleep(self.pause)
             except Exception as e:
                 print("Error AGGREGATOR.storage:{}".format(e))
@@ -1949,11 +1752,17 @@ class Aggregator(multiprocessing.Process):
 
     def solar(self):
         # print('Running solar panel model...')
-        self.dict_solar.update(initialize_load(load_type='solar', 
-            dict_devices=self.dict_devices,
-            dict_house=self.dict_house, 
-            idx=self.idx, distribution=self.distribution))
-
+        self.dict_solar.update(
+            initialize_load(
+                load_type='solar', 
+                dict_devices=self.dict_devices,
+                dict_house=self.dict_house, 
+                idx=self.idx, 
+                distribution=self.distribution,
+                common=self.dict_common,
+                )
+            )
+        self.save_interval += np.random.randint(0,60)
         dict_save = {}
         while True:
             try:
@@ -1961,9 +1770,16 @@ class Aggregator(multiprocessing.Process):
                 if self.dict_common['is_alive']==False:
                     raise KeyboardInterrupt
 
-                self.dict_solar = {**self.dict_solar, **dict(zip(['irradiance_roof', 
-                    'irradiance_wall1' , 'irradiance_wall2', 'irradiance_wall3', 
-                    'irradiance_wall4', 
+                ### update common variables
+                update_from_common(self.dict_solar, self.dict_common)
+                
+
+                self.dict_solar = {**self.dict_solar, **dict(zip([
+                    'irradiance_roof', 
+                    # 'irradiance_wall1' , 
+                    # 'irradiance_wall2', 
+                    # 'irradiance_wall3', 
+                    # 'irradiance_wall4', 
                     'actual_demand'], 
                     [solar.get_irradiance(
                             unixtime=self.dict_common['unixtime'],
@@ -1975,51 +1791,54 @@ class Aggregator(multiprocessing.Process):
                             azimuth=self.dict_solar['azimuth'],
                             albedo=self.dict_solar['albedo'],
                             isotime=self.dict_common['isotime']),
-                    solar.get_irradiance(
-                            unixtime=self.dict_common['unixtime'],
-                            humidity=self.dict_common['humidity'],
-                            latitude=self.dict_solar['latitude'],
-                            longitude=self.dict_solar['longitude'],
-                            elevation=self.dict_solar['elevation'],
-                            tilt=np.ones(len(self.dict_solar['azimuth']))*90,
-                            azimuth=self.dict_solar['azimuth'],
-                            albedo=self.dict_solar['albedo'],
-                            isotime=self.dict_common['isotime']),
-                    solar.get_irradiance(
-                            unixtime=self.dict_common['unixtime'],
-                            humidity=self.dict_common['humidity'],
-                            latitude=self.dict_solar['latitude'],
-                            longitude=self.dict_solar['longitude'],
-                            elevation=self.dict_solar['elevation'],
-                            tilt=np.ones(len(self.dict_solar['azimuth']))*90,
-                            azimuth=self.dict_solar['azimuth']+90,
-                            albedo=self.dict_solar['albedo'],
-                            isotime=self.dict_common['isotime']),
-                    solar.get_irradiance(
-                            unixtime=self.dict_common['unixtime'],
-                            humidity=self.dict_common['humidity'],
-                            latitude=self.dict_solar['latitude'],
-                            longitude=self.dict_solar['longitude'],
-                            elevation=self.dict_solar['elevation'],
-                            tilt=np.ones(len(self.dict_solar['azimuth']))*90,
-                            azimuth=self.dict_solar['azimuth']-90,
-                            albedo=self.dict_solar['albedo'],
-                            isotime=self.dict_common['isotime']),
-                    solar.get_irradiance(
-                            unixtime=self.dict_common['unixtime'],
-                            humidity=self.dict_common['humidity'],
-                            latitude=self.dict_solar['latitude'],
-                            longitude=self.dict_solar['longitude'],
-                            elevation=self.dict_solar['elevation'],
-                            tilt=np.ones(len(self.dict_solar['azimuth']))*90,
-                            azimuth=self.dict_solar['azimuth']+180,
-                            albedo=self.dict_solar['albedo'],
-                            isotime=self.dict_common['isotime']),
+                    # solar.get_irradiance(
+                    #         unixtime=self.dict_common['unixtime'],
+                    #         humidity=self.dict_common['humidity'],
+                    #         latitude=self.dict_solar['latitude'],
+                    #         longitude=self.dict_solar['longitude'],
+                    #         elevation=self.dict_solar['elevation'],
+                    #         tilt=np.ones(len(self.dict_solar['azimuth']))*90,
+                    #         azimuth=self.dict_solar['azimuth'],
+                    #         albedo=self.dict_solar['albedo'],
+                    #         isotime=self.dict_common['isotime']),
+                    # solar.get_irradiance(
+                    #         unixtime=self.dict_common['unixtime'],
+                    #         humidity=self.dict_common['humidity'],
+                    #         latitude=self.dict_solar['latitude'],
+                    #         longitude=self.dict_solar['longitude'],
+                    #         elevation=self.dict_solar['elevation'],
+                    #         tilt=np.ones(len(self.dict_solar['azimuth']))*90,
+                    #         azimuth=self.dict_solar['azimuth']+90,
+                    #         albedo=self.dict_solar['albedo'],
+                    #         isotime=self.dict_common['isotime']),
+                    # solar.get_irradiance(
+                    #         unixtime=self.dict_common['unixtime'],
+                    #         humidity=self.dict_common['humidity'],
+                    #         latitude=self.dict_solar['latitude'],
+                    #         longitude=self.dict_solar['longitude'],
+                    #         elevation=self.dict_solar['elevation'],
+                    #         tilt=np.ones(len(self.dict_solar['azimuth']))*90,
+                    #         azimuth=self.dict_solar['azimuth']-90,
+                    #         albedo=self.dict_solar['albedo'],
+                    #         isotime=self.dict_common['isotime']),
+                    # solar.get_irradiance(
+                    #         unixtime=self.dict_common['unixtime'],
+                    #         humidity=self.dict_common['humidity'],
+                    #         latitude=self.dict_solar['latitude'],
+                    #         longitude=self.dict_solar['longitude'],
+                    #         elevation=self.dict_solar['elevation'],
+                    #         tilt=np.ones(len(self.dict_solar['azimuth']))*90,
+                    #         azimuth=self.dict_solar['azimuth']+180,
+                    #         albedo=self.dict_solar['albedo'],
+                    #         isotime=self.dict_common['isotime']),
                     np.multiply(np.multiply(self.dict_solar['capacity'], 
                             self.dict_solar['irradiance_roof']*1e-3), 
                             self.dict_solar['inverter_efficiency'])*-1
                     ]
                     ))}
+                    
+                if abs(self.dict_common['hour']-12)<=1 and self.dict_common['minute']%5<=1:
+                    self.dict_solar['actual_demand'] = self.dict_solar['actual_demand'] *  0.2 #np.clip(np.random.normal(0.3, 0.1, self.dict_solar['actual_demand'].size), a_min=0.01, a_max=0.9)
 
                 ### send data to main
                 self.pipe_agg_solar1.send(self.dict_solar)
@@ -2031,9 +1850,10 @@ class Aggregator(multiprocessing.Process):
                     else:
                         dict_save.update(prepare_data(states=self.dict_solar, common=self.dict_common))
 
-                    if (len(dict_save.keys())>=self.save_interval) and (self.case!=None):
+                    if (self.dict_common['unixtime']-self.start_unixtime)>=self.save_interval and (self.case!=None):
                         dict_save = save_data(dict_save, case=self.case,  folder=self.casefolder, filename='solar.h5', summary=self.summary)
-                    
+                        self.start_unixtime = self.dict_common['unixtime']
+
                 time.sleep(self.pause)
             except Exception as e:
                 print(f'Error solar:{e}')
@@ -2047,17 +1867,26 @@ class Aggregator(multiprocessing.Process):
 
     def wind(self):
         # print('Running wind turbine model...')
-        self.dict_wind.update(initialize_load(load_type='wind', 
-            dict_devices=self.dict_devices,
-            dict_house=self.dict_house, 
-            idx=self.idx, distribution=self.distribution))
-
+        self.dict_wind.update(
+            initialize_load(
+                load_type='wind', 
+                dict_devices=self.dict_devices,
+                dict_house=self.dict_house, 
+                idx=self.idx, 
+                distribution=self.distribution,
+                common=self.dict_common,
+                )
+            )
+        self.save_interval += np.random.randint(0,60)
         dict_save = {}
         while True:
             try:
                 self.dict_common.update(self.pipe_agg_wind1.recv())
                 if self.dict_common['is_alive']==False:
                     raise KeyboardInterrupt
+                
+                ### update common variables
+                update_from_common(self.dict_wind, self.dict_common)
                 
                 ### send data to main
                 self.pipe_agg_wind1.send(self.dict_wind)
@@ -2069,9 +1898,10 @@ class Aggregator(multiprocessing.Process):
                     else:
                         dict_save.update(prepare_data(states=self.dict_wind, common=self.dict_common))
 
-                    if (len(dict_save.keys())>=self.save_interval) and (self.case!=None):
+                    if (self.dict_common['unixtime']-self.start_unixtime)>=self.save_interval and (self.case!=None):
                         dict_save = save_data(dict_save, case=self.case,  folder=self.casefolder, filename='wind.h5', summary=self.summary)
-                    
+                        self.start_unixtime = self.dict_common['unixtime']
+
                 time.sleep(self.pause)
             except Exception as e:
                 print("Error AGGREGATOR.wind:{}".format(e))

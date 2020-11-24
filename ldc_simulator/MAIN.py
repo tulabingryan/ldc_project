@@ -219,6 +219,7 @@ if __name__ == '__main__':
                 409: 'ldc_0_ev_90',
                 410: 'ldc_0_ev_100',
 
+
                 501: 'ldc_100_ev_10',
                 502: 'ldc_100_ev_20',
                 503: 'ldc_100_ev_30',
@@ -228,9 +229,23 @@ if __name__ == '__main__':
                 507: 'ldc_100_ev_70',
                 508: 'ldc_100_ev_80',
                 509: 'ldc_100_ev_90',
-                610: 'ldc_100_ev_100',
+                510: 'ldc_100_ev_100',
 
+                604: 'basic_100_ev_40',
+                
                 701: 'ldc_0_solar_10',
+                702: 'ldc_0_solar_20',
+                703: 'ldc_0_solar_30',
+                704: 'ldc_0_solar_40',
+
+                801: 'ldc_100_solar_10',
+                802: 'ldc_100_solar_20',
+                803: 'ldc_100_solar_30',
+                804: 'ldc_100_solar_40',
+                
+                812: 'basic_100_solar_20',
+                813: 'basic_100_solar_30',
+                814: 'basic_100_solar_40',
 
                 }
 
@@ -240,8 +255,8 @@ if __name__ == '__main__':
                 4:'emergency'}
     dict_season = {0:None, 
                 1:'winter', 
-                2:'summer', 
-                3:'spring', 
+                2:'spring', 
+                3:'summer', 
                 4:'autumn'}
     dict_season_week = {'summer':3, 
                 'autumn':16, 
@@ -296,25 +311,27 @@ if __name__ == '__main__':
 
 
         if network=='dickert_lv_long':
-            n_units = 60
+            n_houses = 60
             savepath = '/home/pi/studies/results/dickert_lv_long'
         elif network=='ieee_european_lv':
-            n_units = 55
+            n_houses = 55
             savepath = '/home/pi/studies/results/ieee_european_lv'
         elif network=='lv_1':
-            n_units = 1
+            n_houses = 1
             for k in app_per_house.keys(): app_per_house[k] = 1
             savepath = '/home/pi/studies/results/lv_1'
         elif network=='lv_5':
-            n_units = 5
+            n_houses = 5
             for k in app_per_house.keys(): app_per_house[k] = 1
             savepath = '/home/pi/studies/results/lv_5'
         elif network=='lv_60':
-            n_units = 60
+            n_houses = 60
             savepath = '/home/pi/studies/results/lv_60'
         else:
-            n_units = int(options.n)
+            n_houses = int(options.n)
 
+        n_ldc = float(options.a)
+        n_v2g = 0.0
         casefolder = savepath.split('/')[-1]
         os.makedirs(savepath, exist_ok=True)  # create the folder to store results
             
@@ -323,7 +340,7 @@ if __name__ == '__main__':
         longitude = '174.77534779638677'
 
         dt = pd.date_range(start='2020-1-1 00:00:00', end='2021-1-1 00:00').tz_localize('Pacific/Auckland')
-        dt_start = [a for a in dt if a.week==dict_season_week[season]][4]  # week in the middle of season, day of week
+        dt_start = [a for a in dt if a.week==dict_season_week[season]][0]  # week in the middle of season, day of week
         start = dt_start.timestamp()
         devices_to_simulate = ['house', 'baseload', 
             'heatpump', 'heater', 'waterheater', 'fridge', 'freezer',   # thermostat controlled
@@ -336,12 +353,12 @@ if __name__ == '__main__':
 
         if study=='tcl_control':
             n_ldc = float(options.a)
-            dict_devices = {k:{'n_units':int(n_units*app_per_house[k]), 'n_ldc':0} for k in devices_to_simulate}
-            dict_devices['heatpump']['n_ldc'] = int(n_units*n_ldc*app_per_house['heatpump'])
-            dict_devices['fridge']['n_ldc'] = int(n_units*n_ldc*app_per_house['fridge'])
-            dict_devices['freezer']['n_ldc'] = int(n_units*n_ldc*app_per_house['freezer'])
-            dict_devices['heater']['n_ldc'] = int(n_units*n_ldc*app_per_house['heater'])
-            dict_devices['waterheater']['n_ldc'] = int(n_units*n_ldc*app_per_house['waterheater'])
+            dict_devices = {k:{'n_units':int(n_houses*app_per_house[k]), 'n_ldc':0} for k in devices_to_simulate}
+            dict_devices['heatpump']['n_ldc'] = int(n_houses*n_ldc*app_per_house['heatpump'])
+            dict_devices['fridge']['n_ldc'] = int(n_houses*n_ldc*app_per_house['fridge'])
+            dict_devices['freezer']['n_ldc'] = int(n_houses*n_ldc*app_per_house['freezer'])
+            dict_devices['heater']['n_ldc'] = int(n_houses*n_ldc*app_per_house['heater'])
+            dict_devices['waterheater']['n_ldc'] = int(n_houses*n_ldc*app_per_house['waterheater'])
             print('Running setup...')
             for k, v in dict_devices.items(): print(k, v)
             print(f'timestamp:{start}')
@@ -354,7 +371,7 @@ if __name__ == '__main__':
             local_ip = get_local_ip()          
             A = Aggregator(dict_devices, timestamp=start, latitude=latitude, longitude=longitude, 
                 idx=start_idx, local_ip=local_ip, device_ip=device_ip, step_size=step_size, simulation=simulation, 
-                endstamp=start+int(ndays*3600*24)-1, case=case, network=network, casefolder=casefolder, 
+                endstamp=start+int(ndays*3600*24)-10, case=case, network=network, casefolder=casefolder, 
                 algorithm=algorithm, target=target, distribution=distribution, ranking=ranking, 
                 resolution=resolution, ki=ki, tcl_control=tcl_control, delay=delay, report=report, 
                 flex_percent=flex_percent, summary=True)
@@ -365,17 +382,17 @@ if __name__ == '__main__':
                 ev=float(options.ev), storage=float(options.battery), solar=float(options.solar), wind=float(options.wind))
 
             devices_to_simulate = [x for x in app_per_house.keys() if app_per_house[x]>0]
-            ldc_devices = [x for x in devices_to_simulate if x not in ['house', 'baseload', 'solar', 'wind']]
+            ldc_devices = [x for x in devices_to_simulate if x not in ['house', 'baseload', 'solar', 'wind', 'fridge', 'freezer', 'dishwasher', 'clotheswasher']]
+            b2g_devices = ['ev', 'storage']
 
-            n_ldc = float(options.a)
-            dict_devices = {k:{'n_units':int(n_units*app_per_house[k]), 'n_ldc': (k in ldc_devices)*int(n_units*n_ldc*app_per_house[k])} for k in devices_to_simulate}
-
-            # dict_devices['heatpump']['n_ldc'] = int(n_units*n_ldc*app_per_house['heatpump'])
-            # dict_devices['fridge']['n_ldc'] = int(n_units*n_ldc*app_per_house['fridge'])
-            # dict_devices['freezer']['n_ldc'] = int(n_units*n_ldc*app_per_house['freezer'])
-            # dict_devices['heater']['n_ldc'] = int(n_units*n_ldc*app_per_house['heater'])
-            # dict_devices['waterheater']['n_ldc'] = int(n_units*n_ldc*app_per_house['waterheater'])
-            # dict_devices['ev']['n_ldc'] = int(n_units*n_ldc*app_per_house['ev'])
+            dict_devices = {k:{
+                'n_units':int(n_houses*app_per_house[k]), 
+                'n_ldc': (k in ldc_devices)*int(n_houses*n_ldc*app_per_house[k]),
+                'n_b2g': (k in b2g_devices)*int(n_houses*n_v2g*app_per_house[k]),
+                } for k in devices_to_simulate}
+                        
+            if 'storage' in devices_to_simulate:
+                dict_devices['storage']['n_b2g'] = int(n_houses*app_per_house['storage']) # set all batteries as b2g capable
 
             print('Running setup...')
             for k, v in dict_devices.items(): 
@@ -390,7 +407,7 @@ if __name__ == '__main__':
             local_ip = get_local_ip()          
             A = Aggregator(dict_devices, timestamp=start, latitude=latitude, longitude=longitude, 
                 idx=start_idx, local_ip=local_ip, device_ip=device_ip, step_size=step_size, simulation=simulation, 
-                endstamp=start+int(ndays*3600*24)-1, case=case, network=network, casefolder=casefolder, 
+                endstamp=start+int(ndays*3600*24)-10, case=case, network=network, casefolder=casefolder, 
                 algorithm=algorithm, target=target, distribution=distribution, ranking=ranking, 
                 resolution=resolution, ki=ki, tcl_control=tcl_control, delay=delay, report=report, 
                 flex_percent=flex_percent, summary=True)
@@ -428,9 +445,9 @@ if __name__ == '__main__':
             for key, list_loads in load_combinations.items():
                 print(list_loads)
                 n_ldc = float(options.a)
-                dict_devices = {k:{'n_units':int(n_units*app_per_house[k]), 'n_ldc':0} for k in devices_to_simulate}
+                dict_devices = {k:{'n_units':int(n_houses*app_per_house[k]), 'n_ldc':0} for k in devices_to_simulate}
                 for k in list_loads:
-                    dict_devices[k]['n_ldc'] = int(n_units*n_ldc*app_per_house[k])
+                    dict_devices[k]['n_ldc'] = int(n_houses*n_ldc*app_per_house[k])
                 list_case = case.split('_')
                 list_case[1] = key
                 newcase = '_'.join(list_case)
@@ -458,12 +475,12 @@ if __name__ == '__main__':
         else:
             n_ldc = float(options.a)
             if case in ['no_ldc']:
-                dict_devices = {k:{'n_units':int(n_units*app_per_house[k]), 'n_ldc':0} for k in devices_to_simulate}
+                dict_devices = {k:{'n_units':int(n_houses*app_per_house[k]), 'n_ldc':0} for k in devices_to_simulate}
             elif (case in ['basic_ldc_waterheater', 'ripple_control']) or ('wh' in case.split('_')):
-                dict_devices = {k:{'n_units':int(n_units*app_per_house[k]), 'n_ldc':0} for k in devices_to_simulate}
-                dict_devices['waterheater']['n_ldc'] = int(n_units*n_ldc*app_per_house['waterheater'])
+                dict_devices = {k:{'n_units':int(n_houses*app_per_house[k]), 'n_ldc':0} for k in devices_to_simulate}
+                dict_devices['waterheater']['n_ldc'] = int(n_houses*n_ldc*app_per_house['waterheater'])
             else:
-                dict_devices = {k:{'n_units':int(n_units*app_per_house[k]), 'n_ldc':int(n_units*n_ldc*app_per_house[k])} for k in devices_to_simulate}
+                dict_devices = {k:{'n_units':int(n_houses*app_per_house[k]), 'n_ldc':int(n_houses*n_ldc*app_per_house[k])} for k in devices_to_simulate}
                 
                 
             print('Running setup...')
@@ -495,46 +512,57 @@ if __name__ == '__main__':
         start_idx = (int(list(dict_config["group"])[1]) - 1)%5
         device_ip = int(dict_config["id"].split('_')[1])
         n_ldc = 1.0
-        n_units = 1
+        n_houses = 1
+        n_v2g = 0
         target = 'auto'
         
         latitude = '-36.866590076725494'
         longitude = '174.77534779638677'
         start = time.time()
-        
+        app_per_house = {'house':1}
         # define the number of devices to run
         if device_ip==100:
-            dict_devices = {
-            'house':{'n_units':int(n_units), 'n_ldc': int(n_units*n_ldc)},
-            'baseload':{'n_units':int(n_units), 'n_ldc': int(n_units*n_ldc)},
-            'heatpump':{'n_units':int(n_units), 'n_ldc': int(n_units*n_ldc)},
-            # 'heater':{'n_units':int(n_units), 'n_ldc': int(n_units*n_ldc)},  # no heater in Ardmore to avoid adding cooling load to heatpumps
-            'fridge':{'n_units':int(n_units), 'n_ldc': int(n_units*n_ldc)},
-            'freezer':{'n_units':int(n_units), 'n_ldc': int(n_units*n_ldc)},            
-            'clotheswasher':{'n_units':int(n_units), 'n_ldc': int(n_units*n_ldc)},
-            'clothesdryer':{'n_units':int(n_units), 'n_ldc': int(n_units*n_ldc)},
-            'dishwasher':{'n_units':int(n_units), 'n_ldc': int(n_units*n_ldc)},
-            }
+            app_per_house.update(dict(
+                baseload=1, 
+                heatpump=1, 
+                fridge=1,
+                freezer=1,
+                clotheswasher=1,
+                clothesdryer=1,
+                dishwasher=1,
+            ))
+
         
         # elif device_ip==108:
-        #     dict_devices = {
-        #     'house':{'n_units':int(n_units), 'n_ldc': int(n_units*n_ldc)},
-        #     'ev':{'n_units':int(n_units), 'n_ldc': int(n_units*n_ldc), 'v2g':int(n_units)},
-        #     }
+            # app_per_house.update(dict(
+            #     storage=1,
+            # ))
 
         # elif device_ip==111:
-        #     dict_devices = {
-        #     'house':{'n_units':int(n_units), 'n_ldc': int(n_units*n_ldc)},
-        #     'heatpump':{'n_units':int(n_units), 'n_ldc': int(n_units*n_ldc)},
-        #     }
+            # app_per_house.update(dict(
+            #     heatpump=1,
+            # ))
+
         elif device_ip==112:
-            dict_devices = {
-            'house':{'n_units':int(n_units), 'n_ldc': int(n_units*n_ldc)},
-            'waterheater':{'n_units':int(n_units), 'n_ldc': int(n_units*n_ldc)},
-            }
-        else:
-            dict_devices = {'house':{'n_units':int(n_units), 'n_ldc': int(n_units*n_ldc)}}
+            app_per_house.update(dict(
+                waterheater=1,
+            ))
             
+
+        devices_to_simulate = [x for x in app_per_house.keys() if app_per_house[x]>0]
+        ldc_devices = [x for x in devices_to_simulate if x not in ['house', 'baseload', 'solar', 'wind']]
+        b2g_devices = ['ev', 'storage']
+        
+        dict_devices = {k:{
+            'n_units':int(n_houses*app_per_house[k]), 
+            'n_ldc': (k in ldc_devices)*int(n_houses*n_ldc*app_per_house[k]),
+            'n_b2g': (k in b2g_devices)*int(n_houses*n_v2g*app_per_house[k]),
+            } for k in devices_to_simulate}
+        
+        if 'storage' in devices_to_simulate:
+            dict_devices['storage']['n_b2g'] = int(n_houses*app_per_house['storage']) # set all batteries as b2g capable
+
+
         print('Running setup...')
         for k, v in dict_devices.items():
             print(k, v)

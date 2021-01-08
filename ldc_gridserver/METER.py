@@ -154,12 +154,14 @@ class EnergyMeter():
 
         '''read power meter and save'''
         try:
-            now = datetime.datetime.now()
+            # now = datetime.datetime.now()
             
             ### read meter data            
             for param in params:
                 self.dict_data.update(self.read_meter(param))
 
+            self.dict_data.update({'unixtime': time.time(), 'power_kw': np.sum([self.dict_data[x] for x in self.dict_data.keys() if x.startswith('power_active')])})
+            
             ### query states of other devices, and consolidate in dict_data
             # peer_states = MULTICAST.send(dict_msg={'states':'all'}, ip='224.0.2.0', port=17000, timeout=0.3, data_bytes=65536, hops=1)
             # for address, state in peer_states.items():

@@ -247,22 +247,22 @@ def get_data(day=None, unixstart=None, unixend=None):
         else:
             if unixstart: 
                 daystart = pd.to_datetime(unixstart, unit='s').tz_localize('UTC').tz_convert('Pacific/Auckland').strftime('%Y_%m_%d')
-                df_data = pd.read_pickle(f'/home/pi/studies/ardmore/data/T1_{daystart}.pkl.xz', compression='infer')    
+                date_list = [daystart]
             if unixend:
                 dayend = pd.to_datetime(unixstart, unit='s').tz_localize('UTC').tz_convert('Pacific/Auckland').strftime('%Y_%m_%d')
-
-            if daystart!=dayend:
-                df = pd.read_pickle(f'/home/pi/studies/ardmore/data/T1_{dayend}.pkl.xz', compression='infer')     
-                df_data = pd.concat([df_data, df], axis=0)
+                if daystart!=dayend:
+                    date_list = pd.date_range(start='2020-11-24', end='2020-11-30').astype(str)
+                
+                    
+            df_data = pd.concat([pd.read_pickle(f'/home/pi/studies/ardmore/data/T1_{d}.pkl.xz', compression='infer') for d in date_list], axis=0)
 
         
         float_cols = [x for x in df_data.columns if  not x.startswith('timezone')]
-        df_data = df_data[float_cols].astype(float)
-        # print(df_data)
-        # df_data.index = pd.to_datetime(df_data['unixtime'].values, unit='s').tz_localize('UTC').tz_convert('Pacific/Auckland')
+        # df_data = df_data[float_cols].astype(float)
+        df_data.index = pd.to_datetime(df_data['unixtime'].values, unit='s').tz_localize('UTC').tz_convert('Pacific/Auckland')
         # df_data = df_data.resample(f'1S').mean() 
         # df_data = df_data[(df_data['unixtime']>=unixstart)&(df_data['unixtime']<=unixend)]
-        
+        print(df_data.tail(10))
         return df_data
  
     except Exception as e:
@@ -787,7 +787,13 @@ def update_data(n_intervals, history_range, json_data, graph_data):
         df_data.index = pd.to_datetime(df_data['unixtime'].values, unit='s')
         sample = '{}S'.format(max([1,int(n_points/3600)]))
         df_data = df_data.resample(sample).mean().interpolate().reset_index(drop=True)
-        df_data['target_kw'] = df_data['target_watt'] * 1e-3
+        if 'target_watt' in df_data.columns: 
+            df_data['target_kw'] = df_data['target_watt'] * 1e-3
+        if 'power_kw' in df_data.columns:
+            pass
+        else:
+            df_data['power_kw'] = df_data[[x for x in df_data.columns if x.startswith('power_active_')]].sum(axis=1)
+
         # print("update_data dt:", time.perf_counter() - t)
         return df_data.to_json(orient='split')
     except Exception as e:
@@ -829,18 +835,20 @@ def update_graph(history_range, json_data):
             dt_end = dt_start + datetime.timedelta(days=1)
             unixstart =  dt_start.timestamp()
             unixend = dt_end.timestamp()
-
+            
         # print("before json:",time.perf_counter()-t)
         t = time.perf_counter()
         if json_data:
             df_data = pd.read_json(json_data, orient='split') 
             
             t = time.perf_counter()
+
             df_data = df_data[(df_data['unixtime']>=unixstart)&(df_data['unixtime']<=unixend)] 
             df_data.index = pd.to_datetime(df_data['unixtime'].values, unit='s').tz_localize('UTC').tz_convert('Pacific/Auckland') #[pd.to_datetime(a, unit='s').tz_localize('UTC').tz_convert('Pacific/Auckland').isoformat() for a in df_data['unixtime']]
             df_data.index = df_data.index.tz_localize(None)
             # print("data pruning and changing index:", time.perf_counter()-t)
             t = time.perf_counter()
+
             
 
             ### TOTAL POWER ### 
@@ -875,6 +883,18 @@ def update_graph(history_range, json_data):
 
             trace_agg = [trace_actual, trace_limit, trace_avg_60s]
 
+            # trace_agg = [
+            #     go.Scattergl(
+            #         x = df_data.index, 
+            #         y = df_data[x].values,  
+            #         name = x,
+            #         # line= {'color':color_set[1]},
+            #         # opacity = 0.8,
+            #         fill = "tozeroy", # if x.startswith('power_kw') else "toself",
+            #         # mode = 'markers+lines'
+            #         ) for x in ['target_kw', 'power_kw'] if x in df_data.columns
+            # ]
+
             graphs.append(html.Div(dcc.Graph(
                 id='total-demand',
                 animate=False,
@@ -896,36 +916,7 @@ def update_graph(history_range, json_data):
                 ), className='row'))
 
 
-            trace_signal = go.Scattergl(
-                x = df_data.index, 
-                y = df_data["signal"].values, 
-                name = 'signal',
-                line= {'color':'rgb(0,255,255)'},
-                # opacity = 0.8,
-                # fill = "tozeroy",
-                )
-
-            graphs.append(html.Div(dcc.Graph(
-                id='graph-signal',
-                animate=False,
-                figure={'data': [trace_signal],
-                    'layout' : go.Layout(xaxis= dict(autorange=True),
-                              yaxis=dict(autorange=True, title='Frequency(Hz)'),
-                              margin={'l':50,'r':50,'t':50,'b':50},
-                              title='LDC Signal',
-                              # legend=dict(font=dict(size=10), orientation='v', x=0.85, y=1.15),
-                              showlegend=True,
-                              autosize=True,
-                              height=300,
-                              font=dict(color='#CCCCCC'),
-                              titlefont=dict(color='#CCCCCC', size=14),
-                              hovermode="closest",
-                              plot_bgcolor="#020202", #"#191A1A",
-                              paper_bgcolor="#18252E",
-                              uirevision='same',
-                              )}
-                ), className='row'))
-
+            
 
             ### PHASE POWER ###
             list_phase_power = [a for a in df_data.columns if (a.lower().startswith('power_active_') or a.lower().startswith('power_kw_'))]
@@ -1000,7 +991,40 @@ def update_graph(history_range, json_data):
                                     uirevision='same',
                                     )}
                 ), className='row'))
+            
+            trace_signal = go.Scattergl(
+                x = df_data.index, 
+                y = df_data["signal"].values, 
+                name = 'signal',
+                line= {'color':'rgb(0,255,255)'},
+                # opacity = 0.8,
+                # fill = "tozeroy",
+                )
+
+            graphs.append(html.Div(dcc.Graph(
+                id='graph-signal',
+                animate=False,
+                figure={'data': [trace_signal],
+                    'layout' : go.Layout(xaxis= dict(autorange=True),
+                              yaxis=dict(autorange=True, title='Frequency(Hz)'),
+                              margin={'l':50,'r':50,'t':50,'b':50},
+                              title='LDC Signal',
+                              # legend=dict(font=dict(size=10), orientation='v', x=0.85, y=1.15),
+                              showlegend=True,
+                              autosize=True,
+                              height=300,
+                              font=dict(color='#CCCCCC'),
+                              titlefont=dict(color='#CCCCCC', size=14),
+                              hovermode="closest",
+                              plot_bgcolor="#020202", #"#191A1A",
+                              paper_bgcolor="#18252E",
+                              uirevision='same',
+                              )}
+                ), className='row'))
+
+            
             # print("update_graph dt:", time.perf_counter() - t)
+
             return graphs
 
     except Exception as e:

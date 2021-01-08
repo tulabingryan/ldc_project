@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import datetime, time
 import threading, queue, multiprocessing
+from pandas.io.json import json_normalize
 
 # for multicast
 import socket, struct, sys, json, ast

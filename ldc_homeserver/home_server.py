@@ -223,10 +223,12 @@ def update_data(n_intervals, history_range, json_data):
             ### clean validate waterheater demand based on meter data
             list_params = [a for a in df_data.columns if a.lower().endswith('demand')]
             list_grainy = [a for a in df_data.columns if (a.lower().endswith('demand') and not (a.lower().startswith('waterheater')) and not (a.lower().startswith('heatpump')))]  # loads emulated in the grainy load bank
-            df_data['waterheater_actual_demand'] = np.roll(df_data['waterheater_actual_demand'].values, shift=0) * ((((df_data['power_kw']*1e3) - df_data[list_grainy].sum(axis=1)>1900))*1) + np.random.normal(0, 1, df_data.index.size)
+            if 'waterheater_actual_demand' in df_data.columns:
+                df_data['waterheater_actual_demand'] = np.roll(df_data['waterheater_actual_demand'].values, shift=0) * ((((df_data['power_kw']*1e3) - df_data[list_grainy].sum(axis=1)>1900))*1) + np.random.normal(0, 1, df_data.index.size)
             ### clean heatpump demand using meter data and clean waterheater demand
             list_minus_hp = [a for a in df_data.columns if (a.lower().endswith('demand') and not (a.lower().startswith('heatpump')))]
-            df_data['heatpump_actual_demand'] = np.clip(((df_data['power_kw'] * 1000) - np.roll(df_data[list_minus_hp].sum(axis=1), shift=0))-200, a_min=0, a_max=2000)  # assume unaccounted load is 200W, i.e., computer, chroma, etc.
+            if 'heatpump_actual_demand' in df_data.columns:
+                df_data['heatpump_actual_demand'] = np.clip(((df_data['power_kw'] * 1000) - np.roll(df_data[list_minus_hp].sum(axis=1), shift=0))-200, a_min=0, a_max=2000)  # assume unaccounted load is 200W, i.e., computer, chroma, etc.
             
         else:
             df_data['power_kw'] = df_data[[x for x in df_data.columns if x.endswith('actual_demand')]].sum(axis=1) * 1e-3
@@ -285,15 +287,15 @@ def update_graph(json_data):
                             opacity=0.8,
                             )
 
-            trace_rolling_avg_60s = go.Scattergl(
-                            x = df_data.index, 
-                            y = df_data["power_kw"].rolling(60).mean(),
-                            name = 'rolling_avg_60s',
-                            line= {'color':'rgb(255,0,255)'},
-                            connectgaps=False,
-                            # opacity = 0.8,
-                            # fill = "tozeroy",
-                            )
+            # trace_rolling_avg_60s = go.Scattergl(
+            #                 x = df_data.index, 
+            #                 y = df_data["power_kw"].rolling(60).mean(),
+            #                 name = 'rolling_avg_60s',
+            #                 line= {'color':'rgb(255,0,255)'},
+            #                 connectgaps=False,
+            #                 # opacity = 0.8,
+            #                 # fill = "tozeroy",
+            #                 )
 
             graphs.append(html.Div(dcc.Graph(
                             id='total-house-demand',
@@ -328,40 +330,42 @@ def update_graph(json_data):
             list_minus_hp = [a for a in df_data.columns if (a.lower().endswith('demand') and not (a.lower().startswith('heatpump')))]
             # df_data['heatpump_actual_demand'] = np.clip(((df_data['power_kw'] * 1000) - np.roll(df_data[list_minus_hp].sum(axis=1), shift=0))-200, a_min=0, a_max=1500)
             
-            
-            for param in list_params:
-                    traces_demand.extend([
-                            go.Scattergl(
-                                x = df_data.index,
-                                y = df_data[param].values,
-                                name = param.split('_')[0],
-                                mode = 'lines',
-                                fill = "tozeroy",
-                                connectgaps=False,
-                                opacity=0.8,
-                                )
-                            ])
-            graphs.append(html.Div(dcc.Graph(
-                            id='house-demand',
-                            animate=False,
-                            figure={'data': traces_demand,
-                                    'layout' : go.Layout(
-                                        xaxis= dict(autorange=True),
-                                        yaxis=dict(autorange=True, title='Power (W)'),
-                                        margin={'l':50,'r':1,'t':45,'b':50},
-                                        title='Devices Demand',
-                                        # legend=dict(font=dict(size=10), orientation='h', x=0.85, y=1.15),
-                                        autosize=True,
-                                        # height=400,
-                                        font=dict(color='#CCCCCC'),
-                                        titlefont=dict(color='#CCCCCC', size=14),
-                                        hovermode="closest",
-                                        plot_bgcolor="#020202", #"#191A1A",
-                                        paper_bgcolor="#18252E",
-                                        uirevision='same',
-                                        )
-                                    }
-                            ), className='row'))
+            print(list_params)
+            if len(list_params):
+                traces_demand = [
+                        go.Scattergl(
+                            x = df_data.index,
+                            y = df_data[param].values,
+                            name = param.split('_')[0],
+                            mode = 'lines',
+                            fill = "tozeroy",
+                            connectgaps=False,
+                            opacity=0.8,
+                            )
+                            for param in list_params
+                        ]
+                        
+                graphs.append(html.Div(dcc.Graph(
+                                id='house-demand',
+                                animate=False,
+                                figure={'data': traces_demand,
+                                        'layout' : go.Layout(
+                                            xaxis= dict(autorange=True),
+                                            yaxis=dict(autorange=True, title='Power (W)'),
+                                            margin={'l':50,'r':1,'t':45,'b':50},
+                                            title='Devices Demand',
+                                            # legend=dict(font=dict(size=10), orientation='h', x=0.85, y=1.15),
+                                            autosize=True,
+                                            # height=400,
+                                            font=dict(color='#CCCCCC'),
+                                            titlefont=dict(color='#CCCCCC', size=14),
+                                            hovermode="closest",
+                                            plot_bgcolor="#020202", #"#191A1A",
+                                            paper_bgcolor="#18252E",
+                                            uirevision='same',
+                                            )
+                                        }
+                                ), className='row'))
 
             ### plot temperatures
             list_params = [a for a in df_data.columns if a.lower().endswith('temperature')]

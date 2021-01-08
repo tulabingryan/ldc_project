@@ -2202,7 +2202,7 @@ def create_evSpecs(n_evs, ldc_adoption, v2g_adoption, df_houseSpecs, renew=False
             # df_evSpecs['house'] = np.random.choice(df_houseSpecs['name'], p=probability, size=n_evs)
             df_evSpecs['name'] = ['EV' + "%03d" % i for i in range(1, 1+n_evs)]
             df_evSpecs['load_type'] = 'ev'
-            df_evSpecs['capacity'] = FUNCTIONS.populate(n_evs, 5.2, 85., 24.) * 1000 * 3600 # [J] or watts.second
+            df_evSpecs['capacity'] = FUNCTIONS.populate(n_evs, 5.2, 85., 24.) # [kwh]
             df_evSpecs['charging_power'] = FUNCTIONS.populate(n_evs, 1.8, 7.5, 3.5) * 1000 # [W] charging rate in W at home
             df_evSpecs['charging_efficiency'] = FUNCTIONS.populate(n_evs, 0.85, 0.95, 0.90) # [0..1] charging efficiency
             df_evSpecs['soc'] = np.random.uniform(0.5, 1.0, n_evs) # [0..1]current charge status
@@ -2335,7 +2335,7 @@ def create_storageSpecs(n_storages, ldc_adoption, df_houseSpecs, renew=False, re
             df_houseSpecs.index = df_houseSpecs['name'].values
             df_storageSpecs['name'] = ['SG' + "%03d" % i for i in range(1, 1+n_storages)]
             # df_storageSpecs['house'] = np.random.choice(df_houseSpecs['name'], p=probability, size=n_storages)
-            df_storageSpecs['capacity'] = FUNCTIONS.populate(n_storages, 6.4, 13.5, 6.4)  # [kWh] to be converted to watt-hour in object creation
+            df_storageSpecs['capacity'] = FUNCTIONS.populate(n_storages, 6.4, 13.5, 6.4)  # [kWh] 
             df_storageSpecs['charging_power'] = FUNCTIONS.populate(n_storages, 5, 7, 5) # [kW] charging rate in kW at home
             df_storageSpecs['charging_efficiency'] = FUNCTIONS.populate(n_storages, 0.85, 0.95, 0.9) # [0..1] charging efficiency
             df_storageSpecs['soc'] = FUNCTIONS.populate(n_storages, 0.35, 1.0, 0.75) # [0..1]current charge status

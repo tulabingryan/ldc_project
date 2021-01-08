@@ -54,6 +54,7 @@ def send(dict_msg={'sample':'test'}, ip='224.0.2.0', port=17000, timeout=0.5, da
                 break
             except Exception as e:
                 print(f'Error MULTICAST send response loop:{e}')
+                
             
     except Exception as e:
         print("Error in MULTICAST send", e)

@@ -47,6 +47,9 @@ if __name__ == '__main__':
     parser.add_option('--battery', dest='battery', default='None', help='Adoption of battery')
     parser.add_option('--solar', dest='solar', default='None', help='Adoption of solar')
     parser.add_option('--wind', dest='wind', default='None', help='Adoption of wind')
+    parser.add_option('--start_hour', dest='start_hour', default='00:00:00', help='Start hour')
+    parser.add_option('--startsleep', dest='startsleep', default='60', help='startsleep')
+    
 
     options, args = parser.parse_args(sys.argv[1:])
     report = int(options.report)
@@ -83,6 +86,7 @@ if __name__ == '__main__':
                 33:'ideal_direct_k32_tou_step5s',
                 34:'ldc_direct_k32_t50_step1s_halfdb', # duration is 1.75 day
                 35:'ldc_setpoint_k32_t50_step1s_halfdb', # duration is 1.75 day
+
                 
                 101:'ramp_direct_k16_t100_d0s',
                 102:'ramp_direct_k32_t100_d0s',
@@ -219,7 +223,7 @@ if __name__ == '__main__':
                 409: 'ldc_0_ev_90',
                 410: 'ldc_0_ev_100',
 
-
+                500: 'ldc_100_ev_0',
                 501: 'ldc_100_ev_10',
                 502: 'ldc_100_ev_20',
                 503: 'ldc_100_ev_30',
@@ -246,6 +250,55 @@ if __name__ == '__main__':
                 812: 'basic_100_solar_20',
                 813: 'basic_100_solar_30',
                 814: 'basic_100_solar_40',
+
+                901: 'ldc_0_der_10',
+                902: 'ldc_0_der_20',
+                903: 'ldc_0_der_30',
+                904: 'ldc_0_der_40',
+                905: 'ldc_0_der_50',
+                906: 'ldc_0_der_60',
+                907: 'ldc_0_der_70',
+                908: 'ldc_0_der_80',
+                909: 'ldc_0_der_90',
+                910: 'ldc_0_der_100',
+
+                1001: 'ldc_100_der_10',
+                1002: 'ldc_100_der_20',
+                1003: 'ldc_100_der_30',
+                1004: 'ldc_100_der_40',
+                1005: 'ldc_100_der_50',
+                1006: 'ldc_100_der_60',
+                1007: 'ldc_100_der_70',
+                1008: 'ldc_100_der_80',
+                1009: 'ldc_100_der_90',
+                1010: 'ldc_100_der_100',
+
+                1101: 'batt_100_der_10',
+                1102: 'batt_100_der_20',
+                1103: 'batt_100_der_30',
+                1104: 'batt_100_der_40',
+                1105: 'batt_100_der_50',
+                1106: 'batt_100_der_60',
+                1107: 'batt_100_der_70',
+                1108: 'batt_100_der_80',
+                1109: 'batt_100_der_90',
+                1110: 'batt_100_der_100',
+
+                1200: 'batt_0_der_40',
+                1201: 'batt_10_der_40',
+                1202: 'batt_20_der_40',
+                1203: 'batt_30_der_40',
+                1204: 'batt_40_der_40',
+                1205: 'batt_50_der_40',
+                1206: 'batt_60_der_40',
+                1207: 'batt_70_der_40',
+                1208: 'batt_80_der_40',
+                1209: 'batt_90_der_40',
+                1210: 'batt_100_der_40',
+
+                2004: 'ldc_0_der_40_trans',
+                2014: 'ldc_100_der_40_trans',
+
 
                 }
 
@@ -289,7 +342,7 @@ if __name__ == '__main__':
         step_size = float(options.t)
         network = dict_network[int(options.k)]
         device_ip = 200
-        start_idx = options.idx
+        start_idx = 10
         savepath = options.folder
         target = options.target
         # avg = float(options.avg)
@@ -339,7 +392,10 @@ if __name__ == '__main__':
         latitude = '-36.866590076725494'
         longitude = '174.77534779638677'
 
-        dt = pd.date_range(start='2020-1-1 00:00:00', end='2021-1-1 00:00').tz_localize('Pacific/Auckland')
+        start_date = f'2020-1-1 {options.start_hour}'
+        print(start_date)
+
+        dt = pd.date_range(start=start_date, end='2021-1-1 00:00').tz_localize('Pacific/Auckland')
         dt_start = [a for a in dt if a.week==dict_season_week[season]][0]  # week in the middle of season, day of week
         start = dt_start.timestamp()
         devices_to_simulate = ['house', 'baseload', 
@@ -386,9 +442,9 @@ if __name__ == '__main__':
             b2g_devices = ['ev', 'storage']
 
             dict_devices = {k:{
-                'n_units':int(n_houses*app_per_house[k]), 
-                'n_ldc': (k in ldc_devices)*int(n_houses*n_ldc*app_per_house[k]),
-                'n_b2g': (k in b2g_devices)*int(n_houses*n_v2g*app_per_house[k]),
+                'n_units':max([1, int(n_houses*app_per_house[k])]), 
+                'n_ldc': (k in ldc_devices)* max([1, int(n_houses*n_ldc*app_per_house[k])]),
+                'n_b2g': (k in b2g_devices)* max([int(n_houses*n_v2g*app_per_house[k])]),
                 } for k in devices_to_simulate}
                         
             if 'storage' in devices_to_simulate:
@@ -502,7 +558,7 @@ if __name__ == '__main__':
 
 
     else:
-        time.sleep(60)
+        time.sleep(float(options.startsleep))
         dict_config = read_json('/home/pi/ldc_project/config_self.json')
         dict_cmd = read_json('/home/pi/ldc_project/ldc_simulator/dict_cmd.txt')
         algorithm = dict_cmd['algorithm']

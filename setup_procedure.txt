@@ -14,7 +14,7 @@ sudo nano /etc/dhcpcd.conf
 # add the following lines to the file
 ssid SPARK-EVS5UK
 static ip_address=192.168.1.1/24
-static domain_name_servers=192.168.1.254
+static domain_name_servers=192.168.1.254 8.8.8.8
 static routers=192.168.1.254
 
 
@@ -171,3 +171,8 @@ path=/home/pi/berryconda3/bin:$PATH
 
 ### install sshpass to enable sending of files through ssh using python code
 sudo apt-get install sshpass
+
+
+### kill group of processes
+ps -jef | grep MAIN.py   # get process group ID (at third column)
+sudo kill -9 -{PID} # PID is the process group ID

@@ -54,6 +54,15 @@ from PACKAGES import *
 import collections
 
 
+try:
+    from inspect import isfunction
+    from numba import vectorize, njit, guvectorize
+    has_numba = True
+except ImportError:
+    has_numba = False
+    
+
+
 ######## helper functions #################
 def update_dict(old_dict, new_dict):
     '''
@@ -86,8 +95,9 @@ def get_local_ip(report=False):
             s.close()
             break
         except Exception as e:
-            if report: print(f"{datetime.datetime.now().isoformat()} Error get_local_ip:{e}")
-            time.sleep(1)
+            # if report: 
+            print(f"{datetime.datetime.now().isoformat()} Error get_local_ip:{e}")
+            time.sleep(10)
         except KeyboardInterrupt:
             break
     return local_ip
@@ -192,189 +202,242 @@ def execute_state(newstate, device_id, report=False):
 
 
 
+# def prepare_data(states, common):
+#     try:
+#         if states['load_type'][0] in ['heatpump', 'heater']:
+#             return {np.round(common['unixtime'], 1):{
+#             'temp_out': ','.join(np.char.zfill(np.round(states['temp_out'], 3).astype(str), 7)),
+#             'humidity_out': ','.join(np.char.zfill(np.round(states['humidity'], 3).astype(str), 7)),
+#             'windspeed': ','.join(np.char.zfill(np.round(states['windspeed'], 3).astype(str), 7)),
+#             'temp_in': ','.join(np.char.zfill(np.round(states['temp_in'], 3).astype(str), 7)),
+#             'temp_target': ','.join(np.char.zfill(np.round(states['temp_target'], 3).astype(str), 7)),
+#             'humidity_in': ','.join(np.char.zfill(np.round(states['humidity_in'], 3).astype(str), 7)),
+#             'flexibility': ','.join(np.char.zfill(np.round(states['flexibility'], 5).astype(str), 7)),
+#             'priority': ','.join(np.char.zfill(np.round(states['priority'], 3).astype(str), 7)),
+#             'actual_demand': ','.join(np.char.zfill(np.round(states['actual_demand'], 1).astype(str), 7)),
+#             'ldc_signal': ','.join(np.char.zfill(np.round(states['ldc_signal'], 3).astype(str), 7)),
+#             'actual_status': ','.join(states['actual_status'].astype(int).astype(str)),
+#             'connected': ','.join(states['connected'].astype(int).astype(str)),
+#             'mode': ','.join(states['mode'].astype(int).astype(str)),
+#             }}
+#         elif states['load_type'][0] in ['fridge', 'freezer', 'waterheater']:
+#             return {np.round(common['unixtime'], 1):{
+#             'temp_in': ','.join(np.char.zfill(np.round(states['temp_in'], 3).astype(str), 7)),
+#             'temp_target': ','.join(np.char.zfill(np.round(states['temp_target'], 3).astype(str), 7)),
+#             'flexibility': ','.join(np.char.zfill(np.round(states['flexibility'], 5).astype(str), 7)),
+#             'priority': ','.join(np.char.zfill(np.round(states['priority'], 3).astype(str), 7)),
+#             'actual_demand': ','.join(np.char.zfill(np.round(states['actual_demand'], 1).astype(str), 7)),
+#             'ldc_signal': ','.join(np.char.zfill(np.round(states['ldc_signal'], 3).astype(str), 7)),
+#             'actual_status': ','.join(states['actual_status'].astype(int).astype(str)),
+#             'connected': ','.join(states['connected'].astype(int).astype(str)),
+#             }}
+#         elif states['load_type'][0] in ['clotheswasher', 'clothesdryer', 'dishwasher']:
+#             return {np.round(common['unixtime'], 1):{
+#             'progress': ','.join(np.char.zfill(np.round(states['progress'], 5).astype(str), 7)),
+#             'flexibility': ','.join(np.char.zfill(np.round(states['flexibility'], 5).astype(str), 7)),
+#             'priority': ','.join(np.char.zfill(np.round(states['priority'], 3).astype(str), 7)),
+#             'actual_demand': ','.join(np.char.zfill(np.round(states['actual_demand'], 1).astype(str), 7)),
+#             'ldc_signal': ','.join(np.char.zfill(np.round(states['ldc_signal'], 3).astype(str), 7)),
+#             'actual_status': ','.join(states['actual_status'].astype(int).astype(str)),
+#             'connected': ','.join(states['connected'].astype(int).astype(str)),
+#             'mode': ','.join(states['mode'].astype(int).astype(str)),
+#             }}
+#         elif states['load_type'][0] in ['ev', 'storage']:
+#             return {np.round(common['unixtime'], 1):{
+#             'soc': ','.join(np.char.zfill(np.round(states['soc'], 5).astype(str), 7)),
+#             'target_soc': ','.join(np.char.zfill(np.round(states['target_soc'], 5).astype(str), 7)),
+#             'flexibility': ','.join(np.char.zfill(np.round(states['flexibility'], 5).astype(str), 7)),
+#             'priority': ','.join(np.char.zfill(np.round(states['priority'], 3).astype(str), 7)),
+#             'actual_status': ','.join(states['actual_status'].astype(int).astype(str)),
+#             'mode': ','.join(states['mode'].astype(int).astype(str)),
+#             'connected': ','.join(states['connected'].astype(int).astype(str)),
+#             'actual_demand': ','.join(np.char.zfill(np.round(states['actual_demand'], 1).astype(str), 7)),
+#             'ldc_signal': ','.join(np.char.zfill(np.round(states['ldc_signal'], 3).astype(str), 7)),
+#             }}
+#         elif states['load_type'][0] in ['solar', 'wind']:
+#             return {np.round(common['unixtime'], 1):{
+#             'priority': ','.join(np.char.zfill(np.round(states['priority'], 3).astype(str), 7)),
+#             'actual_status': ','.join(states['actual_status'].astype(int).astype(str)),
+#             'mode': ','.join(states['mode'].astype(int).astype(str)),
+#             'connected': ','.join(states['connected'].astype(int).astype(str)),
+#             'actual_demand': ','.join(np.char.zfill(np.round(states['actual_demand'], 1).astype(str), 7)),
+#             'ldc_signal': ','.join(np.char.zfill(np.round(states['ldc_signal'], 3).astype(str), 7)),
+#             }}
+#         else:
+#             return {np.round(common['unixtime'], 1):{
+#             'actual_demand': ','.join(np.char.zfill(np.round(states['actual_demand'], 1).astype(str), 7)),
+#             }}
+#     except Exception as e:
+#         print(f'Error MODELS.prepare_data:{e}')
+#         print(states['temp_target'])
+
+dict_params = {
+    'temp_in': ['mean', 'min', 'max', 'std'], 
+    'temp_target': ['mean', 'min', 'max', 'std'], 
+    'temp_out': ['mean', 'min', 'max', 'std'], 
+    'soc': ['mean', 'min', 'max', 'std'],  
+    'target_soc': ['mean', 'min', 'max', 'std'], 
+    'humidity_in': ['mean', 'min', 'max', 'std'], 
+    'humidity_out': ['mean', 'min', 'max', 'std'], 
+    'windspeed_out': ['mean', 'min', 'max', 'std'], 
+    'flexibility': ['mean', 'min', 'max', 'std'],  
+    'priority': ['mean', 'min', 'max', 'std'], 
+    'actual_demand': ['sum'], 
+    'actual_status': ['sum'],
+    'proposed_status': ['sum'], 
+    'mode': ['sum'],
+    'connected': ['sum'],
+    'ldc_signal': ['mean'],
+    }
+
+monitored_params = dict_params.keys()
+
 def prepare_data(states, common):
     try:
-        if states['load_type'][0] in ['heatpump', 'heater']:
-            return {np.round(common['unixtime'], 1):{
-            'temp_out': ','.join(np.char.zfill(states['temp_out'].round(3).astype(str), 7)),
-            'humidity_out': ','.join(np.char.zfill(states['humidity'].round(3).astype(str), 7)),
-            'windspeed': ','.join(np.char.zfill(states['windspeed'].round(3).astype(str), 7)),
-            'temp_in': ','.join(np.char.zfill(states['temp_in'].round(3).astype(str), 7)),
-            'temp_target': ','.join(np.char.zfill(states['temp_target'].round(3).astype(str), 7)),
-            'humidity_in': ','.join(np.char.zfill(states['humidity_in'].round(3).astype(str), 7)),
-            'flexibility': ','.join(np.char.zfill(states['flexibility'].round(5).astype(str), 7)),
-            'priority': ','.join(np.char.zfill(states['priority'].round(3).astype(str), 7)),
-            'actual_demand': ','.join(np.char.zfill(states['actual_demand'].round(1).astype(str), 7)),
-            'ldc_signal': ','.join(np.char.zfill(states['ldc_signal'].round(3).astype(str), 7)),
-            'actual_status': ','.join(states['actual_status'].astype(int).astype(str)),
-            'connected': ','.join(states['connected'].astype(int).astype(str)),
-            'mode': ','.join(states['mode'].astype(int).astype(str)),
-            }}
-        elif states['load_type'][0] in ['fridge', 'freezer', 'waterheater']:
-            return {np.round(common['unixtime'], 1):{
-            'temp_in': ','.join(np.char.zfill(states['temp_in'].round(3).astype(str), 7)),
-            'temp_target': ','.join(np.char.zfill(states['temp_target'].round(3).astype(str), 7)),
-            'flexibility': ','.join(np.char.zfill(states['flexibility'].round(5).astype(str), 7)),
-            'priority': ','.join(np.char.zfill(states['priority'].round(3).astype(str), 7)),
-            'actual_demand': ','.join(np.char.zfill(states['actual_demand'].round(1).astype(str), 7)),
-            'ldc_signal': ','.join(np.char.zfill(states['ldc_signal'].round(3).astype(str), 7)),
-            'actual_status': ','.join(states['actual_status'].astype(int).astype(str)),
-            'connected': ','.join(states['connected'].astype(int).astype(str)),
-            }}
-        elif states['load_type'][0] in ['clotheswasher', 'clothesdryer', 'dishwasher']:
-            return {np.round(common['unixtime'], 1):{
-            'progress': ','.join(np.char.zfill(states['progress'].round(5).astype(str), 7)),
-            'flexibility': ','.join(np.char.zfill(states['flexibility'].round(5).astype(str), 7)),
-            'priority': ','.join(np.char.zfill(states['priority'].round(3).astype(str), 7)),
-            'actual_demand': ','.join(np.char.zfill(states['actual_demand'].round(1).astype(str), 7)),
-            'ldc_signal': ','.join(np.char.zfill(states['ldc_signal'].round(3).astype(str), 7)),
-            'actual_status': ','.join(states['actual_status'].astype(int).astype(str)),
-            'connected': ','.join(states['connected'].astype(int).astype(str)),
-            'mode': ','.join(states['mode'].astype(int).astype(str)),
-            }}
-        elif states['load_type'][0] in ['ev', 'storage']:
-            return {np.round(common['unixtime'], 1):{
-            'soc': ','.join(np.char.zfill(states['soc'].round(5).astype(str), 7)),
-            'target_soc': ','.join(np.char.zfill(states['target_soc'].round(5).astype(str), 7)),
-            'flexibility': ','.join(np.char.zfill(states['flexibility'].round(5).astype(str), 7)),
-            'priority': ','.join(np.char.zfill(states['priority'].round(3).astype(str), 7)),
-            'actual_status': ','.join(states['actual_status'].astype(int).astype(str)),
-            'mode': ','.join(states['mode'].astype(int).astype(str)),
-            'connected': ','.join(states['connected'].astype(int).astype(str)),
-            'actual_demand': ','.join(np.char.zfill(states['actual_demand'].round(1).astype(str), 7)),
-            'ldc_signal': ','.join(np.char.zfill(states['ldc_signal'].round(3).astype(str), 7)),
-            }}
-        elif states['load_type'][0] in ['solar', 'wind']:
-            return {np.round(common['unixtime'], 1):{
-            'priority': ','.join(np.char.zfill(states['priority'].round(3).astype(str), 7)),
-            'actual_status': ','.join(states['actual_status'].astype(int).astype(str)),
-            'mode': ','.join(states['mode'].astype(int).astype(str)),
-            'connected': ','.join(states['connected'].astype(int).astype(str)),
-            'actual_demand': ','.join(np.char.zfill(states['actual_demand'].round(1).astype(str), 7)),
-            'ldc_signal': ','.join(np.char.zfill(states['ldc_signal'].round(3).astype(str), 7)),
-            }}
-        else:
-            return {np.round(common['unixtime'], 1):{
-            'actual_demand': ','.join(np.char.zfill(states['actual_demand'].round(1).astype(str), 7)),
-            }}
+        payload = {}
+        states_params = states.keys()
+
+        for k in monitored_params:
+            if k in states_params:
+                if np.isscalar(states[k]):
+                    payload.update({k:[states[k]]})
+                else:
+                    payload.update({k:states[k].tolist()})
+
+        return {common['unixtime']: payload} #{k:v for k, v in states.items() if k in params}}
     except Exception as e:
-        print(f'Error MODELS.prepare_data:{e}')
-        print(states['temp_target'])
+        print(f"Error prepare_data:{e}")
+    
+
 
 
 def prepare_summary(states, common):
     try:
-        if states['load_type'][0] in ['heatpump', 'heater']:
-            return {common['unixtime']:{
-            'mean_temp_out': states['temp_out'].mean().round(3),
-            'mean_humidity_out': states['humidity'].mean().round(3),
-            'mean_windspeed_out': states['windspeed'].mean().round(3),
-            'mean_temp_in': states['temp_in'].mean().round(3),
-            'min_temp_in': states['temp_in'].min().round(3),
-            'max_temp_in': states['temp_in'].max().round(3),
-            'std_temp_in': states['temp_in'].std().round(3),
-            'temp_in': ','.join(np.char.zfill(states['temp_in'].round(3).astype(str), 7)),
-            'temp_target': states['temp_target'].mean().round(3),
-            'mean_humidity_in': states['humidity_in'].mean().round(3),
-            'min_humidity_in': states['humidity_in'].min().round(3),
-            'max_humidity_in': states['humidity_in'].max().round(3),
-            'std_humidity_in': states['humidity_in'].std().round(3),
-            'mean_flexibility': states['flexibility'].mean().round(5),
-            'min_flexibility': states['flexibility'].min().round(5),
-            'max_flexibility': states['flexibility'].max().round(5),
-            'std_flexibility': states['flexibility'].std().round(5),
-            'mean_priority': states['priority'].mean().round(3),
-            'min_priority': states['priority'].min().round(3),
-            'max_priority': states['priority'].max().round(3),
-            'std_priority': states['priority'].std().round(3),
-            'sum_actual_demand': states['actual_demand'].sum().round(1),
-            'mean_ldc_signal': states['ldc_signal'].mean().round(3),
-            'sum_actual_status': states['actual_status'].sum(),
-            'sum_connected': states['connected'].sum(),
-            }}
-        elif states['load_type'][0] in ['fridge', 'freezer', 'waterheater']:
-            return {common['unixtime']:{
-            'mean_temp_in': states['temp_in'].mean().round(3),
-            'min_temp_in': states['temp_in'].min().round(3),
-            'max_temp_in': states['temp_in'].max().round(3),
-            'std_temp_in': states['temp_in'].std().round(5),
-            'temp_in': ','.join(np.char.zfill(states['temp_in'].round(3).astype(str), 7)),
-            'mean_temp_target': states['temp_target'].mean().round(3),
-            'mean_flexibility': states['flexibility'].mean().round(5),
-            'min_flexibility': states['flexibility'].min().round(5),
-            'max_flexibility': states['flexibility'].max().round(5),
-            'std_flexibility': states['flexibility'].std().round(5),
-            'mean_priority': states['priority'].mean().round(3),
-            'min_priority': states['priority'].min().round(3),
-            'max_priority': states['priority'].max().round(3),
-            'std_priority': states['priority'].std().round(3),
-            'sum_actual_demand': states['actual_demand'].sum().round(1),
-            'mean_ldc_signal': states['ldc_signal'].mean().round(3),
-            'sum_actual_status': states['actual_status'].sum(),
-            'sum_connected': states['connected'].sum(),
-            }}
-        elif states['load_type'][0] in ['clotheswasher', 'clothesdryer', 'dishwasher']:
-            return {common['unixtime']:{
-            'mean_progress': states['progress'].astype(float).mean().round(5),
-            'min_progress': states['progress'].astype(float).min().round(5),
-            'max_progress': states['progress'].astype(float).max().round(5),
-            'std_progress': states['progress'].astype(float).std().round(5),
-            'progress': ','.join(np.char.zfill(states['progress'].round(5).astype(str), 7)),
-            'mean_flexibility': states['flexibility'].astype(float).mean().round(5),
-            'min_flexibility': states['flexibility'].astype(float).min().round(5),
-            'max_flexibility': states['flexibility'].astype(float).max().round(5),
-            'std_flexibility': states['flexibility'].astype(float).std().round(5),
-            'mean_priority': states['priority'].astype(float).mean().round(5),
-            'min_priority': states['priority'].astype(float).min().round(5),
-            'max_priority': states['priority'].astype(float).max().round(5),
-            'std_priority': states['priority'].astype(float).std().round(5),
-            'sum_actual_demand': states['actual_demand'].astype(float).sum().round(5),
-            'mean_ldc_signal': states['ldc_signal'].astype(float).mean().round(5),
-            'sum_actual_status': states['actual_status'].astype(float).sum(),
-            'sum_connected': states['connected'].astype(float).sum(),
-            }}
-        elif states['load_type'][0] in ['ev', 'storage']:
-            return {common['unixtime']:{
-            'mean_soc': states['soc'].astype(float).mean().round(5),
-            'min_soc': states['soc'].astype(float).min().round(5),
-            'max_soc': states['soc'].astype(float).max().round(5),
-            'std_soc': states['soc'].astype(float).std().round(5),
-            'soc': ','.join(np.char.zfill(states['soc'].round(5).astype(str), 7)), 
-            'mean_target_soc': states['target_soc'].astype(float).mean().round(5),
-            'min_target_soc': states['target_soc'].astype(float).min().round(5),
-            'max_target_soc': states['target_soc'].astype(float).max().round(5),
-            'std_target_soc': states['target_soc'].astype(float).std().round(5),
-            'mean_flexibility': states['flexibility'].astype(float).mean().round(5),
-            'min_flexibility': states['flexibility'].astype(float).min().round(5),
-            'max_flexibility': states['flexibility'].astype(float).max().round(5),
-            'std_flexibility': states['flexibility'].astype(float).std().round(5),
-            'mean_priority': states['priority'].astype(float).mean().round(3),
-            'min_priority': states['priority'].astype(float).min().round(3),
-            'max_priority': states['priority'].astype(float).max().round(3),
-            'std_priority': states['priority'].astype(float).std().round(3),
-            'sum_actual_status': states['actual_status'].astype(float).sum(),
-            'sum_connected': states['connected'].astype(float).sum(),
-            'sum_actual_demand': states['actual_demand'].astype(float).sum().round(1),
-            'mean_ldc_signal': states['ldc_signal'].astype(float).mean().round(3),
-            }}
-        elif states['load_type'][0] in ['solar', 'wind']:
-            return {common['unixtime']:{
-            'mean_priority': states['priority'].mean().round(3),
-            'min_priority': states['priority'].min().round(3),
-            'max_priority': states['priority'].max().round(3),
-            'std_priority': states['priority'].std().round(3),
-            'sum_actual_status': states['actual_status'].sum(),
-            'sum_connected': states['connected'].sum(),
-            'sum_actual_demand': states['actual_demand'].sum().round(1),
-            'mean_ldc_signal': states['ldc_signal'].mean().round(3),
-            }}
-        else:
-            return {common['unixtime']:{
-            'sum_actual_demand': states['actual_demand'].sum().round(1),
-            }}
+        payload = {}
+        states_params = states.keys()
+
+        for k in monitored_params:
+            if k in states_params:
+                for m in dict_params[k]:
+                    payload.update({f'{m}_{k}': eval(f'np.{m}(states["{k}"]).round(5)')})
+        return {common['unixtime']: payload}
+        
     except Exception as e:
-        print(f'Error MODELS.prepare_summary:{e}')
-        print(states['temp_target'])
+        print(f"Error prepare_summary:{e}")
+
+# def prepare_summary(states, common):
+#     try:
+#         if states['load_type'][0] in ['heatpump', 'heater']:
+#             return {common['unixtime']:{
+#             'mean_temp_out': states['temp_out'].mean().round(3),
+#             'mean_humidity_out': states['humidity'].mean().round(3),
+#             'mean_windspeed_out': states['windspeed'].mean().round(3),
+#             'mean_temp_in': states['temp_in'].mean().round(3),
+#             'min_temp_in': states['temp_in'].min().round(3),
+#             'max_temp_in': states['temp_in'].max().round(3),
+#             'std_temp_in': states['temp_in'].std().round(3),
+#             'temp_in': ','.join(np.char.zfill(states['temp_in'].round(3).astype(str), 7)),
+#             'temp_target': states['temp_target'].mean().round(3),
+#             'mean_humidity_in': states['humidity_in'].mean().round(3),
+#             'min_humidity_in': states['humidity_in'].min().round(3),
+#             'max_humidity_in': states['humidity_in'].max().round(3),
+#             'std_humidity_in': states['humidity_in'].std().round(3),
+#             'mean_flexibility': states['flexibility'].mean().round(5),
+#             'min_flexibility': states['flexibility'].min().round(5),
+#             'max_flexibility': states['flexibility'].max().round(5),
+#             'std_flexibility': states['flexibility'].std().round(5),
+#             'mean_priority': states['priority'].mean().round(3),
+#             'min_priority': states['priority'].min().round(3),
+#             'max_priority': states['priority'].max().round(3),
+#             'std_priority': states['priority'].std().round(3),
+#             'sum_actual_demand': states['actual_demand'].sum().round(1),
+#             'mean_ldc_signal': states['ldc_signal'].mean().round(3),
+#             'sum_actual_status': states['actual_status'].sum(),
+#             'sum_connected': states['connected'].sum(),
+#             }}
+#         elif states['load_type'][0] in ['fridge', 'freezer', 'waterheater']:
+#             return {common['unixtime']:{
+#             'mean_temp_in': states['temp_in'].mean().round(3),
+#             'min_temp_in': states['temp_in'].min().round(3),
+#             'max_temp_in': states['temp_in'].max().round(3),
+#             'std_temp_in': states['temp_in'].std().round(5),
+#             'temp_in': ','.join(np.char.zfill(states['temp_in'].round(3).astype(str), 7)),
+#             'mean_temp_target': states['temp_target'].mean().round(3),
+#             'mean_flexibility': states['flexibility'].mean().round(5),
+#             'min_flexibility': states['flexibility'].min().round(5),
+#             'max_flexibility': states['flexibility'].max().round(5),
+#             'std_flexibility': states['flexibility'].std().round(5),
+#             'mean_priority': states['priority'].mean().round(3),
+#             'min_priority': states['priority'].min().round(3),
+#             'max_priority': states['priority'].max().round(3),
+#             'std_priority': states['priority'].std().round(3),
+#             'sum_actual_demand': states['actual_demand'].sum().round(1),
+#             'mean_ldc_signal': states['ldc_signal'].mean().round(3),
+#             'sum_actual_status': states['actual_status'].sum(),
+#             'sum_connected': states['connected'].sum(),
+#             }}
+#         elif states['load_type'][0] in ['clotheswasher', 'clothesdryer', 'dishwasher']:
+#             return {common['unixtime']:{
+#             'mean_progress': states['progress'].astype(float).mean().round(5),
+#             'min_progress': states['progress'].astype(float).min().round(5),
+#             'max_progress': states['progress'].astype(float).max().round(5),
+#             'std_progress': states['progress'].astype(float).std().round(5),
+#             'progress': ','.join(np.char.zfill(states['progress'].round(5).astype(str), 7)),
+#             'mean_flexibility': states['flexibility'].astype(float).mean().round(5),
+#             'min_flexibility': states['flexibility'].astype(float).min().round(5),
+#             'max_flexibility': states['flexibility'].astype(float).max().round(5),
+#             'std_flexibility': states['flexibility'].astype(float).std().round(5),
+#             'mean_priority': states['priority'].astype(float).mean().round(5),
+#             'min_priority': states['priority'].astype(float).min().round(5),
+#             'max_priority': states['priority'].astype(float).max().round(5),
+#             'std_priority': states['priority'].astype(float).std().round(5),
+#             'sum_actual_demand': states['actual_demand'].astype(float).sum().round(5),
+#             'mean_ldc_signal': states['ldc_signal'].astype(float).mean().round(5),
+#             'sum_actual_status': states['actual_status'].astype(float).sum(),
+#             'sum_connected': states['connected'].astype(float).sum(),
+#             }}
+#         elif states['load_type'][0] in ['ev', 'storage']:
+#             return {common['unixtime']:{
+#             'mean_soc': states['soc'].astype(float).mean().round(5),
+#             'min_soc': states['soc'].astype(float).min().round(5),
+#             'max_soc': states['soc'].astype(float).max().round(5),
+#             'std_soc': states['soc'].astype(float).std().round(5),
+#             'soc': ','.join(np.char.zfill(states['soc'].round(5).astype(str), 7)), 
+#             'mean_target_soc': states['target_soc'].astype(float).mean().round(5),
+#             'min_target_soc': states['target_soc'].astype(float).min().round(5),
+#             'max_target_soc': states['target_soc'].astype(float).max().round(5),
+#             'std_target_soc': states['target_soc'].astype(float).std().round(5),
+#             'mean_flexibility': states['flexibility'].astype(float).mean().round(5),
+#             'min_flexibility': states['flexibility'].astype(float).min().round(5),
+#             'max_flexibility': states['flexibility'].astype(float).max().round(5),
+#             'std_flexibility': states['flexibility'].astype(float).std().round(5),
+#             'mean_priority': states['priority'].astype(float).mean().round(3),
+#             'min_priority': states['priority'].astype(float).min().round(3),
+#             'max_priority': states['priority'].astype(float).max().round(3),
+#             'std_priority': states['priority'].astype(float).std().round(3),
+#             'sum_actual_status': states['actual_status'].astype(float).sum(),
+#             'sum_connected': states['connected'].astype(float).sum(),
+#             'sum_actual_demand': states['actual_demand'].astype(float).sum().round(1),
+#             'mean_ldc_signal': states['ldc_signal'].astype(float).mean().round(3),
+#             }}
+#         elif states['load_type'][0] in ['solar', 'wind']:
+#             return {common['unixtime']:{
+#             'mean_priority': states['priority'].mean().round(3),
+#             'min_priority': states['priority'].min().round(3),
+#             'max_priority': states['priority'].max().round(3),
+#             'std_priority': states['priority'].std().round(3),
+#             'sum_actual_status': states['actual_status'].sum(),
+#             'sum_connected': states['connected'].sum(),
+#             'sum_actual_demand': states['actual_demand'].sum().round(1),
+#             'mean_ldc_signal': states['ldc_signal'].mean().round(3),
+#             }}
+#         else:
+#             return {common['unixtime']:{
+#             'sum_actual_demand': states['actual_demand'].sum().round(1),
+#             }}
+#     except Exception as e:
+#         print(f'Error MODELS.prepare_summary:{e}')
+#         print(states['temp_target'])
 
 
 # def save_data(dict_save, folder, filename, case, sample='1S', summary=False):
@@ -612,9 +675,9 @@ def compute_temp_in(temp_in, temp_out, temp_fill, heat_all, Ua, Ca, Cp, mass_flo
 
     """
     R = 1 / Ua
-    tt = (mass_flow * (Cp*R)) + 1
-    tau = (Ca*R) / tt
-    a = np.exp(-(step_size / tau))
+    tt = np.multiply(mass_flow, np.multiply(Cp, R)) + 1
+    tau = np.multiply(Ca, R) / tt
+    a = np.exp(-np.divide(step_size, tau))
     return ((a*temp_in) + ((1-a) * ((temp_out + ((R*heat_all) + ((mass_flow*Cp)*(R*temp_fill)))) / tt) ))
 
 
@@ -628,13 +691,14 @@ def enduse_tcl(states):
     Returns:
         states: updated state parameters
     '''
-    states['temp_fill'] = states['temp_out']
+    states['temp_fill'] = np.asarray(states['temp_out']).reshape(-1)
 
     states['heat_all'] = np.add(
         states['solar_heat'], 
         states['power_thermal']
-        ) 
-    states['temp_in'] = compute_temp_in(
+        ).reshape(-1)
+
+    states['temp_in'] = np.asarray(compute_temp_in(
         states['temp_in'], 
         states['temp_out'], 
         states['temp_fill'], 
@@ -644,12 +708,12 @@ def enduse_tcl(states):
         states['Cp'], 
         states['mass_flow'], 
         states['step_size'],
-        )
-
+        )).reshape(-1)
+    
     return states
 
 ### battery ###
-def compute_soc(soc, actual_demand, capacity, step_size):
+def compute_soc(soc, actual_demand, capacity, step_size, charging_efficiency):
     '''
     Calculate the state of charge based on a math model.
     
@@ -657,7 +721,8 @@ def compute_soc(soc, actual_demand, capacity, step_size):
         soc: state of charge of the battery
         actual_demand: power demand to charge the battery
         capacity: battery rated capacity
-        step_size: time step
+        step_size: time step,
+        charging_efficiency: efficiency of charger
 
     Returns:
         soc: updated state of charge
@@ -665,7 +730,7 @@ def compute_soc(soc, actual_demand, capacity, step_size):
     References:
 
     '''
-    return ((actual_demand*step_size) + (soc*capacity)) / capacity
+    return ((actual_demand*step_size*charging_efficiency) + (soc*capacity)) / capacity
 
 
 def compute_battery_demand(driving, driving_power, actual_demand):
@@ -717,7 +782,7 @@ def enduse_battery(states):
         
     '''
     if 'ev' in states['load_type']:
-        states['soc'] = compute_soc(
+        states['soc'] = np.asarray(compute_soc(
             states['soc'],
             compute_battery_demand(
                 states['driving'], 
@@ -726,21 +791,23 @@ def enduse_battery(states):
                 ),
             states['capacity'], 
             states['step_size'],
-            )
+            states['charging_efficiency'],
+            )).reshape(-1)
 
     else:
-        states['soc'] = compute_soc(
+        states['soc'] = np.asarray(compute_soc(
             states['soc'], 
             states['actual_demand'], 
             states['capacity'], 
             states['step_size'],
-            )
+            states['charging_efficiency']
+            )).reshape(-1)
 
-    states['progress'] = compute_progress_battery(
+    states['progress'] = np.asarray(compute_progress_battery(
         states['soc'], 
         states['target_soc'], 
         states['connected'],
-        )
+        )).reshape(-1)
 
     return states
     
@@ -775,13 +842,13 @@ def enduse_ntcl(states):
     Returns:
         states: updated state parameters
     '''
-    states['progress'] = compute_progress_ntcl(
+    states['progress'] = np.asarray(compute_progress_ntcl(
         states['progress'], 
         states['len_profile'], 
         states['step_size'], 
         states['actual_status'], 
         states['connected'],
-        )
+        )).reshape(-1)
     
     states['soc'] = states['progress']
 
@@ -912,48 +979,52 @@ def device_tcl(states, common, inverter=False):
     '''
     try:
         ### calculate actual demand and actual thermal output
-        states['actual_demand'] = compute_actual_demand_tcl(
+        states['actual_demand'] = np.asarray(compute_actual_demand_tcl(
             states['proposed_demand'], 
             states['standby_power'], 
             states['ventilation_power'], 
             states['actual_status'],
-            )
+            )).reshape(-1)
 
         ### calculate actual thermal power injected or removed from the thermal zone
-        states['power_thermal'] = compute_power_thermal(
+        states['power_thermal'] = np.asarray(compute_power_thermal(
                 states['mode'], 
                 states['actual_demand'], 
                 states['cop'], 
-                )
+                )).reshape(-1)
 
         ### update proposed status and proposed demand
-        states['proposed_status'] = compute_proposed_status_tcl(
+        states['proposed_status'] = np.asarray(compute_proposed_status_tcl(
             states['mode'], 
             states['proposed_status'], 
             states['temp_in'], 
             states['temp_target'], 
             states['tolerance'],
-            )
+            )).reshape(-1)
 
-        states['proposed_demand'] = compute_proposed_demand_tcl(
+        states['proposed_demand'] = np.asarray(compute_proposed_demand_tcl(
             states['mode'], 
             states['cooling_power'], 
             states['heating_power'], 
             states['standby_power'], 
             states['ventilation_power'], 
             states['proposed_status'],
-            )
+            )).reshape(-1)
 
         ### update flexibility
-        states['flexibility'] = compute_flexibility_tcl(
+        states['flexibility'] = np.asarray(compute_flexibility_tcl(
             states['mode'], 
             states['temp_in'], 
             states['temp_min'], 
             states['temp_max'],
-            )
+            )).reshape(-1)
+
+        # for k, v in states.items():
+        #     print(k, v)
+
         return 
     except Exception as e:
-        print("Error MODELS.device_cooling_compression:{}".format(e))
+        print("Error MODELS.device_tcl:{}".format(e))
         return {}
 
 
@@ -1055,7 +1126,7 @@ def compute_adjusted_min_soc(min_soc, target_soc, unixtime, unixstart, unixend):
     #     adjusted_min_soc = min_soc
     # else:
 
-    return target_soc * (1-np.exp(-(unixend-unixstart)/((unixend-unixstart)/2)))  #(1 - np.(unixtime-unixstart) / (unixend-unixstart))
+    return target_soc * (1-np.exp(-(unixend-unixstart)/((unixend-unixstart)*0.7)))  #(1 - np.(unixtime-unixstart) / (unixend-unixstart))
     
     # if adjusted_min_soc>=target_soc:
     #     return target_soc-0.1
@@ -1137,7 +1208,7 @@ def compute_actual_demand_battery(proposed_demand, charging_power, priority, pri
         b2g: battery to grid capability [0,1]
         with_dr: response capability [0,1]
         connected: boolean if plugged in [0,1]
-    
+        
     Returns:
         actual_demand: actual or approved power demand [W]
     References:
@@ -1145,21 +1216,15 @@ def compute_actual_demand_battery(proposed_demand, charging_power, priority, pri
     '''
     if (connected==0) or (with_dr==1 and b2g==0 and priority_offset<0):
         return 0
-    elif (with_dr==1 and priority>0):
-        return proposed_demand * (compute_normalize(priority_offset, 0.0, 100-priority, 0.0, 1.0))
-    elif (with_dr==1 and priority<=0):
-        return proposed_demand * (compute_normalize(priority_offset+abs(priority), 0.0, 100-priority, 0.0, 1.0))
-    elif (with_dr==1 and b2g==1 and priority_offset<0 and priority>0):
-        return -1 * charging_power * compute_normalize(abs(priority_offset), 0.0, priority, 0.0, 1.0)
-    
-        
-        # elif (with_dr==1 and ):
-        #     demand = proposed_demand * (compute_normalize(priority_offset, 0.0, 100-abs(priority), 0.0, 1.0))
-        #     demand += proposed_demand * abs(priority)*1e-2
-        #     if demand>=proposed_demand:
-        #         return proposed_demand
-        #     else:
-        #         return demand
+    elif (with_dr==1 and b2g==1 and priority_offset<0 and priority>20):
+        return -1 * charging_power * compute_normalize(abs(priority_offset), 0.0, 90.0, 0.0, 1.0)
+    elif (with_dr==1):
+        new_demand = proposed_demand * (compute_normalize(priority_offset, 0.0, 90-priority, 0.0, 1.0))
+        if new_demand>proposed_demand:
+            return proposed_demand
+        else:
+            return new_demand
+
     else:
         return proposed_demand
         
@@ -1186,7 +1251,7 @@ def device_battery(states):
     
     '''
     ### calculate actual_demand based on approved status and proposed demand from previous step
-    states['actual_demand'] = compute_actual_demand_battery(
+    states['actual_demand'] = np.asarray(compute_actual_demand_battery(
         states['proposed_demand'], 
         states['charging_power'],
         states['priority'],
@@ -1194,18 +1259,18 @@ def device_battery(states):
         states['b2g'],
         states['with_dr'],
         states['connected'],
-        )
+        )).reshape(-1)
     
 
     ### update proposed_status and proposed_demand for next step
-    states['proposed_status'] = compute_proposed_status_battery(
+    states['proposed_status'] = np.asarray(compute_proposed_status_battery(
         states['progress'], 
-        states['connected'])
+        states['connected'])).reshape(-1)
 
     ### mathematical model
-    states['proposed_demand'] = compute_proposed_demand_battery(
+    states['proposed_demand'] = np.asarray(compute_proposed_demand_battery(
         states['charging_power'], 
-        states['soc']) 
+        states['soc'])).reshape(-1)
 
     ### predict finish and calculate flexibility based on newly proposed demand
     # states['predicted_finish'] = compute_finish_battery(
@@ -1230,7 +1295,7 @@ def device_battery(states):
     #     )
 
     if 'ev' in states['load_type']:
-        states['flexibility'] = compute_flexibility_battery(
+        states['flexibility'] = np.asarray(compute_flexibility_battery(
             states['soc'], 
             states['target_soc'], 
             compute_adjusted_min_soc(
@@ -1241,15 +1306,15 @@ def device_battery(states):
                 states['unixend'],
                 ),
             states['connected'],
-            )
+            )).reshape(-1)
             
     else:
-        states['flexibility'] = compute_flexibility_battery(
+        states['flexibility'] = np.asarray(compute_flexibility_battery(
             states['soc'], 
             states['target_soc'], 
             states['min_soc'],
             states['connected'],
-            )
+            )).reshape(-1)
     
 
     return states
@@ -1428,16 +1493,16 @@ def device_ntcl(states, dict_data):
         updated dictionary
     '''
     ### calculate actual_demand based on approved status and proposed demand from previous step
-    states['actual_demand'] = compute_actual_demand_ntcl(
+    states['actual_demand'] = np.asarray(compute_actual_demand_ntcl(
         states['proposed_demand'], 
         states['actual_status'], 
-        )
+        )).reshape(-1)
 
     ### update proposed_status and proposed_demand for next step
-    states['proposed_status'] = compute_proposed_status_ntcl(
+    states['proposed_status'] = np.asarray(compute_proposed_status_ntcl(
         states['progress'], 
         states['connected'],
-        )
+        )).reshape(-1)
 
     ### mathematical model
     # states['proposed_demand'] = compute_proposed_demand_ntcl(
@@ -1445,25 +1510,25 @@ def device_ntcl(states, dict_data):
     #     states['soc'])
 
     # states['proposed_demand'] = np.array([np.interp(x*y, np.arange(y), dict_data[k]) for k, x, y in zip(states['profile'], states['len_profile'], states['progress'])]).flatten()
-    states['proposed_demand'] = np.array([dict_data[k][int((x*y)%x)] for k, x, y in zip(
+    states['proposed_demand'] = np.asarray([dict_data[k][int((x*y)%x)] for k, x, y in zip(
         states['profile'], 
         states['len_profile'], 
-        states['progress'])]).flatten()
+        states['progress'])]).reshape(-1)
 
     ### predict finish and calculate flexibility based on newly proposed demand
-    states['predicted_finish'] = compute_finish_ntcl(
+    states['predicted_finish'] = np.asarray(compute_finish_ntcl(
         states['unixtime'], 
         states['progress'], 
         states['len_profile'],
-        )
+        )).reshape(-1)
 
     ### get flexibility
-    states['flexibility'] = compute_flexibility_ntcl(
+    states['flexibility'] = np.asarray(compute_flexibility_ntcl(
         states['unixstart'],
         states['unixend'],
         states['predicted_finish'],
         states['len_profile'],
-        )
+        )).reshape(-1)
     
     return states
 
@@ -1615,7 +1680,7 @@ def ldc_injector(ldc_signal, latest, target, step_size, algorithm, hour=0, minut
 
     ### basic ldc
     if algorithm=='no_ldc':
-        return {'ldc_signal': np.power(ldc_signal,0)*100}
+        return {'ldc_signal': np.power(ldc_signal,0)*90}
     elif algorithm in ['basic_ldc', 'advanced_ldc']:
         # use PID control
 
@@ -1624,7 +1689,7 @@ def ldc_injector(ldc_signal, latest, target, step_size, algorithm, hour=0, minut
         # Kp, Ti, Td = dict_pid[K]
         # Ki = Kp/Ti
         # Kd = Kp*Td
-        
+        min_load = 0.001
         
 
         error = np.subtract(target, latest) #np.divide(np.subtract(target_loading, latest_loading), target_loading)
@@ -1633,10 +1698,16 @@ def ldc_injector(ldc_signal, latest, target, step_size, algorithm, hour=0, minut
         # K = K + abs(derivative)
         Kp, Ki, Kd = abb_itae(1, K, 1, 'PID')
 
+        # Kp = 0
+        # Ki = 512.0 *1000 / 1.34e6
+        # Kd = 0
+
         p_term = np.multiply(Kp, error)
-        i_term = np.clip(np.add(previous_i_term, np.multiply(error, step_size)), a_min=0, a_max=100/Ki) #np.add(signal, np.multiply(Ki, np.multiply(error, step_size)))
+        i_term = np.clip(np.add(previous_i_term, np.multiply(error, step_size)), a_min=0, a_max=90/Ki) #np.add(signal, np.multiply(Ki, np.multiply(error, step_size)))
         d_term = derivative
         new_signal = np.add(p_term, np.add(np.multiply(Ki, i_term), np.multiply(Kd, d_term))) 
+        if latest<=min_load:
+            new_signal = np.add(new_signal, (10*(min_load-latest)/min_load))
         return {
                 'ldc_signal': np.clip(new_signal, a_min=0, a_max=100),
                 'previous_error': error,
@@ -1805,10 +1876,7 @@ def read_signal(old_signal, new_signal, resolution, delay, step_size, simulation
     
 
 def normalize(value, a_min=20, a_max=80, x_max=100, x_min=0):
-    x_max = max([x_max, np.max(value)])
-    x_min = min([x_min, np.min(value)])
-    return np.add(a_min, np.multiply(np.divide((value - x_min), (x_max - x_min)), 
-                 np.subtract(a_max, a_min)))
+    return np.add(a_min, np.multiply(np.divide((value - x_min), (x_max - x_min)), np.subtract(a_max, a_min)))
 
 def compute_normalize(value, in_min, in_max, out_min, out_max):
     '''
@@ -1850,7 +1918,7 @@ def compute_min_cycletime(priority, ldc_signal):
     # return abs(ldc_signal-priority)
     # if min_cycletime<10:
     #     return min_cycletime * 10
-    return 3
+    return 1
 
     
     
@@ -1989,6 +2057,7 @@ def ldc_dongle(states, common):
         states['old_signal'] = np.ones(states['ldc_signal'].size)*common['ldc_signal']
         states['ldc_signal'] = ldc_signal
         states['step_size'] = np.ones(states['ldc_signal'].size)*common['step_size']
+        states['alpha'] = np.exp(states['step_size']/60)
         old_status = states['actual_status']
         
         ### update priority and actual_status
@@ -2009,7 +2078,7 @@ def ldc_dongle(states, common):
             elif common['algorithm']=='advanced_ldc':
                 # priority is based on the flexibility and random number from normal distribution of mean 0 and std 1.0
                 # flex_priority = normalize(states['flexibility'], a_min=1.0, a_max=99.0, x_max=1.0, x_min=-0.2)
-                states['priority'] = normalize(states['flexibility'], a_min=1.0, a_max=99.0, x_max=1.0, x_min=-0.1)
+                states['priority'] = normalize(states['flexibility'], a_min=1.0, a_max=90.0, x_min=0.0, x_max=1.0)
                 # states['priority'] = compute_normalize(
                 #     states['flexibility'], 
                 #     np.zeros(states['flexibility'].size), 
@@ -2095,6 +2164,8 @@ def ldc_dongle(states, common):
                     )
                 
                 # states['actual_status'] = compute_changed_status(old_status, states['actual_status'], states['counter'], states['min_cycletime'])
+            elif states['load_type'][0] in ['solar', 'wind']:
+                states['priority'] = np.ones(states['priority'].size) * 90
 
             else:
                 states['actual_status'] = compute_actual_status(
@@ -2131,17 +2202,21 @@ def ldc_dongle(states, common):
 
         states['counter'] = compute_counter(old_status, states['actual_status'], states['counter'], states['step_size'])
 
-        # if 'ev' in states['load_type']:
-        # #     idx_max = 42 #np.argsort(states['priority_offset']) #np.argmax(states['priority_offset'])
-        #     print(
-        #         common['isotime'], 
-        #         states['actual_demand'][:2],
-        #         # np.subtract(states['unixend'][:2], states['unixtime'][:2]),
-        #         states['priority'][:2],
-        #         states['soc'][:2], 
-        #         states['target_soc'][:2], 
-        #         states['flexibility'][:2], 
-        #         common['ldc_signal'])
+        # if 'storage' in states['load_type']:
+        # # #     idx_max = 42 #np.argsort(states['priority_offset']) #np.argmax(states['priority_offset'])
+        #     n = 10
+        #     print(common['isotime'])
+        #     for i in range(n):
+        #         print(
+        #             states['actual_demand'][i],
+        #             # states['charging_power'][i],
+        #             states['priority'][i],
+        #             # states['soc'][i], 
+        #             # states['min_soc'][i],
+        #             # states['target_soc'][i], 
+        #             # states['flexibility'][i], 
+        #             states['ldc_signal'][i],
+        #             )
             # print(
             #     # common['ldc_signal'].round(1),
             #     # states['min_cycletime'][idx_max].mean().round(1),
@@ -2480,7 +2555,17 @@ def get_solar(unixtime, humidity, latitude, longitude, elevation,
         print("Error MODELS.solar_heat:",e)
         return {}
 
-
+dict_ev = {
+    'tesla_s85_90kwh': {'capacity': 90.0, 'charging_power': 7.4},  # [kwh] [kW]
+    'tesla_s60_60kwh': {'capacity': 60.0, 'charging_power': 7.4},
+    'tesla_3_75kwh': {'capacity': 75.0, 'charging_power': 7.4},
+    'nissan_leaf_30kwh': {'capacity': 30.0, 'charging_power': 3.3},
+    'ford_focus_23kwh': {'capacity': 23.0, 'charging_power': 3.3},
+    'ford_focus_33kwh': {'capacity': 33.0, 'charging_power': 3.3},
+    'mitsubishi_imiev_16kwh': {'capacity': 16.0, 'charging_power': 3.3},
+    'chevy_volt_16kwh': {'capacity': 16.0, 'charging_power': 3.3},
+    'tesla_powerwall_13kwh': {'capacity': 13.0, 'charging_power': 7.4},
+    }
 
 def initialize_load(load_type, dict_devices, dict_house, idx, distribution, common, realtime=True):
     dict_load_type_id = {
@@ -2535,9 +2620,12 @@ def initialize_load(load_type, dict_devices, dict_house, idx, distribution, comm
 
     for k, v in dict_out.items():
         dict_out[k] = np.array(v)
+
     
     dict_out['unixstart'] = np.random.normal(common['unixtime'] - (common['hour']*3600), 0.1, n_units)
     dict_out['unixend'] = np.random.normal(common['unixtime'] - (common['hour']*3600) + (3600*24), 0.1, n_units)
+    dict_out['alpha'] = np.exp(np.ones(n_units)/60)
+    dict_out['actual_demand'] = np.zeros(n_units)
         
     if load_type in ['heatpump', 'heater']:
         dict_out['latitude'] = dict_house['latitude'][np.arange(n_units)%n_house]
@@ -2552,12 +2640,14 @@ def initialize_load(load_type, dict_devices, dict_house, idx, distribution, comm
         dict_out['skylight_area'] = dict_house['skylight_area'][np.arange(n_units)%n_house]
         dict_out['mass_flow'] = np.zeros(n_units)   
         dict_out['temp_target'] = dict_out['heating_setpoint']
-        dict_out['temp_in'] = dict_out['temp_target'] - np.abs((np.random.normal(0.0,0.1,n_units)*dict_out['tolerance']))
+        # dict_out['temp_in'] = dict_out['temp_target'] - np.abs((np.random.normal(0.0,0.1,n_units)*dict_out['tolerance']))
         dict_out['solar_heat'] = np.zeros(n_units)
         dict_out['power_thermal'] = np.zeros(n_units)
         dict_out['heat_all'] = np.zeros(n_units)
         dict_out['temp_out'] = np.random.normal(common['temp_out'], 0.01, n_units)
         dict_out['humidity'] = np.random.normal(common['humidity'], 0.01, n_units)
+        dict_out['humidity_in'] = dict_out['humidity'] - np.random.normal(0.1, 0.001, n_units)
+        dict_out['windspeed'] = np.random.normal(common['windspeed'], 0.01, n_units)
         
 
     if load_type in ['fridge', 'freezer']:
@@ -2567,7 +2657,7 @@ def initialize_load(load_type, dict_devices, dict_house, idx, distribution, comm
         dict_out['solar_heat'] = np.zeros(n_units)
         dict_out['power_thermal'] = np.zeros(n_units)
         dict_out['heat_all'] = np.zeros(n_units)
-        dict_out['temp_in'] = dict_out['temp_target'] + (np.random.normal(0.0,0.1,n_units)*dict_out['tolerance'])
+        # dict_out['temp_in'] = dict_out['temp_target'] + (np.random.normal(0.0,0.1,n_units)*dict_out['tolerance'])
         # air density is 1.225kg/m^3 at 15degC sea level
         # air density is 1.2041 kg/m^3 at 20 degC sea level
         # water density is 999.1 kg/m^3 at 15degC sea level
@@ -2575,7 +2665,7 @@ def initialize_load(load_type, dict_devices, dict_house, idx, distribution, comm
         dict_out['mode'] = np.ones(n_units)
         dict_out['temp_target'] = dict_out['heating_setpoint']
         dict_out['temp_max'] = dict_out['temp_target'] + (dict_out['tolerance']*0.9)
-        dict_out['temp_in'] = dict_out['temp_target'] - np.abs((np.random.normal(0.0,0.3,n_units)*dict_out['tolerance']))
+        # dict_out['temp_in'] = dict_out['temp_target'] - np.abs((np.random.normal(0.0,0.3,n_units)*dict_out['tolerance']))
         dict_out['min_cycletime'] = np.random.uniform(1, 1.1, n_units)
         dict_out['solar_heat'] = np.zeros(n_units)
         dict_out['power_thermal'] = np.zeros(n_units)
@@ -2583,23 +2673,46 @@ def initialize_load(load_type, dict_devices, dict_house, idx, distribution, comm
         # dict_out['counter'] = np.random.uniform(2, 3, n_units)
         # dict_out['temp_in'] = np.random.normal(np.mean(dict_out['temp_in']), np.std(dict_out['temp_in']), n_units)
 
-    if load_type in ['ev', 'storage']:
-        dict_out['soc'] = np.random.uniform(0.7, 0.8, n_units)
+    if load_type in ['storage']:
+        dict_out['soc'] = np.clip(np.random.normal(0.5, 0.3, n_units), a_min=0.2, a_max=0.8)
         dict_out['progress'] = np.divide(dict_out['soc'], dict_out['target_soc'])
         dict_out['mode'] = np.zeros(n_units)
-        dict_out['min_soc'] = np.random.uniform(0.3, 0.4, n_units)
+        dict_out['min_soc'] = np.random.uniform(0.2, 0.3, n_units)
         dict_out['target_soc'] = np.random.uniform(0.9, 0.95, n_units)
         dict_out['connected'] = np.ones(n_units)
-        
+        dict_out['charging_power'] = np.ones(n_units) * 7400
+        dict_out['capacity'] = np.ones(n_units) * 13.0 * 1000 * 3600
+        dict_out['b2g'] = np.ones(n_units)
+        # dict_out['capacity'] = np.array([dict_ev[x]['capacity'] for x in dict_out['profile']]) * 1000 * 3600
+        # dict_out['charging_power'] = np.array([dict_ev[x]['charging_power'] for x in dict_out['profile']]) 
+        # print(dict_out['capacity']/1e3/3.6e3)
+        # print(dict_out['charging_power']/1e3)
         # dict_out['schedule_skew'] = np.random.uniform(-900, 900, n_units)
     
     if load_type=='ev':
-        dict_out['trip_distance'] = np.clip(np.random.normal(25, 10, n_units), a_min=10, a_max=100) # [km] avg daily trip
-        dict_out['trip_time'] = np.clip(np.random.normal(0.5, 0.1, n_units), a_min=0.2, a_max=1.5) #[hours] avg daily trip
-        dict_out['km_per_kwh'] = np.random.uniform(4.225, 6.76, n_units) #[km/kWh] 1kWh per 6.5 km avg 
-        dict_out['driving_power'] = ((dict_out['trip_distance']/dict_out['trip_time']) / dict_out['km_per_kwh']) * 1000 * -1 #[W]
+        dict_out['soc'] = np.random.uniform(0.7, 0.8, n_units)
+        dict_out['progress'] = np.divide(dict_out['soc'], dict_out['target_soc'])
+        dict_out['min_soc'] = np.random.uniform(0.3, 0.4, n_units)
+        dict_out['target_soc'] = np.random.uniform(0.9, 0.95, n_units)
+        dict_out['connected'] = np.ones(n_units)
+        dict_out['capacity'] = np.array([dict_ev[x]['capacity'] for x in dict_out['profile']]) * 1000 * 3600
+        dict_out['charging_power'] = np.array([dict_ev[x]['charging_power'] for x in dict_out['profile']]) * 1000 
+        
+        dict_out['daily_energy'] = np.multiply(np.clip(np.random.normal(0.6, 0.05, n_units), a_min=0.55, a_max=0.65), dict_out['capacity']) #[Ws]
+        dict_out['km_per_kwh'] = np.clip(np.random.normal(6.0, 0.1, n_units), a_min=4.225, a_max=6.76) #[km/kWh] 1kWh per 6.5 km avg 
+        dict_out['trip_distance'] = np.multiply(dict_out['km_per_kwh'], dict_out['daily_energy']/1e3/3.6e3) # [km] avg daily trip
+        dict_out['avg_speed'] = np.clip(np.random.normal(85, 10, n_units), a_min=50, a_max=100)  # [km/h]
+        dict_out['trip_time'] = np.divide(dict_out['trip_distance']*0.5, dict_out['avg_speed']) #[hours] avg daily trip
+        dict_out['driving_power'] = ((dict_out['trip_distance']*0.5/dict_out['trip_time']) / dict_out['km_per_kwh']) * 1000 * -1 #[W]
         dict_out['unixstart'] = np.random.normal(common['unixtime'] - (common['hour']*3600) - (6*3600), 1800, n_units)
         dict_out['unixend'] = np.random.normal(common['unixtime'] - (common['hour']*3600) + (6*3600), 1800, n_units)
+        
+        # print(dict_out['daily_energy']/1e3/3.6e3)
+        # print(dict_out['km_per_kwh'])
+        # print(dict_out['trip_distance'])
+        # print(dict_out['avg_speed'])
+        # print(dict_out['trip_time'])
+        # print(dict_out['driving_power'])
         
     if load_type in ['dishwasher', 'clothesdryer', 'clotheswasher']:
         dict_out['finished'] = np.ones(n_units)
@@ -2609,9 +2722,10 @@ def initialize_load(load_type, dict_devices, dict_house, idx, distribution, comm
       
     if load_type in ['solar', 'wind']:
         dict_out['mode'] = np.ones(n_units)  # generation modes are 1
-        dict_out['priority'] = np.zeros(n_units)
+        dict_out['priority'] = np.ones(n_units) * 90.0
         dict_out['connected'] = np.ones(n_units)
-        dict_out['flexibility'] = np.zeros(n_units)
+        dict_out['flexibility'] = np.ones(n_units) * 0.9
+        dict_out['capacity'] = np.clip(np.round(np.random.normal(270*18, 270, n_units), -1), a_min=270*10, a_max=270*56)
 
         #   'mean_priority': states['priority'].mean().round(3),
         #     'min_priority': states['priority'].min().round(3),
@@ -2643,6 +2757,10 @@ def initialize_load(load_type, dict_devices, dict_house, idx, distribution, comm
             # dict_out['priority'] = np.random.uniform(p_min, p_max, n_units )
     else:
         pass
+
+    # if not has_numba:
+    #     for k, v in dict_out.items():
+    #         dict_out[k] = np.asarray(v)[0]
             
     return dict_out
 
@@ -2700,11 +2818,8 @@ def update_device(n_device, device_type, dict_startcode, dict_self, dict_parent,
                         
 
 
-try:
-    from inspect import isfunction
-    from numba import vectorize, njit, guvectorize
 
-    has_numba = True
+if has_numba:
     # Vectorise all 'core' functions. 
     # Utility function are excluded as they are just wrappers.
     numba_funcs = []
@@ -2716,6 +2831,8 @@ try:
         #     globals()[func[0]] = guvectorize(func[1])
         #     numba_funcs.append(func)
 
-except ImportError:
-    has_numba = False
+
+
+
+
 

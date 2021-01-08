@@ -1,21 +1,6 @@
 
 from models import *
 
-# def send_msgs(conn, msgs)
-#   for msg in msgs:
-#     conn.send(msg)
-#   conn.close()
-
-# def recv_msg(conn):
-#   while 1:
-#     msg = conn.recv()
-#     if msg=='END':
-#       break
-#     print(msg)
-
-# parent_conn, child_conn = multiprocessing.Pipe()
-
-
 class Aggregator(multiprocessing.Process):
     """Aggregator for all objects of the system"""
     n = 0
@@ -128,7 +113,7 @@ class Aggregator(multiprocessing.Process):
             self.casefolder = casefolder
             self.target = target
             if target in ['auto', 'tou']:
-                self.target_loading = 50.0
+                self.target_loading = 20.0
             else:
                 self.target_loading = float(target)
         else:
@@ -284,7 +269,7 @@ class Aggregator(multiprocessing.Process):
         
 
         # run list_processes
-        self.dict_common.update({'is_alive': True, 'ldc_signal':0.0})
+        self.dict_common.update({'is_alive': True, 'ldc_signal': 0.0})
         for t in self.list_processes:
             t.daemon = True
             t.start()
@@ -334,6 +319,7 @@ class Aggregator(multiprocessing.Process):
                     self.dict_summary_status[f'{k}'] = new['actual_status'].tolist()
                     self.dict_summary_mode[f'{k}'] = new['mode'].tolist()
                     self.dict_summary_flexibility[f'{k}'] = new['flexibility'].tolist()
+                    
                     d_prep = prepare_data(states=new, common=self.dict_common)
                     
                     ### update dict_state
@@ -348,6 +334,9 @@ class Aggregator(multiprocessing.Process):
                     'states': self.dict_state,
                     'common': self.dict_common
                         })
+                
+                # for k, v in self.dict_agg.items():
+                #     print(k, v)
 
                 # if self.q_states.full():
                 #     self.q_states.get()
@@ -380,8 +369,8 @@ class Aggregator(multiprocessing.Process):
                 
                     
                     if self.target=='auto': 
-                        w = 1 - np.exp(-self.dict_common['step_size']/(3600)) #self.dict_common['step_size'] / (3600)
-                        self.target_loading = np.clip((self.dict_common['loading_percent']*(w)) + (self.target_loading*(1-w)), a_min=0.0, a_max=100.0)
+                        w = self.dict_common['step_size'] / (3600) # 1 - np.exp(-self.dict_common['step_size']/(3600)) #
+                        self.target_loading = np.clip((self.dict_common['loading_percent']*(w)) + (self.target_loading*(1-w)), a_min=0.1, a_max=90.0)
 
 
                     elif self.target=='tou':
@@ -793,7 +782,7 @@ class Aggregator(multiprocessing.Process):
         self.dict_baseload['mode'] = np.zeros(n_units)
         self.dict_baseload['flexibility'] = np.zeros(n_units)
         self.save_interval += np.random.randint(0,60)
-
+        
         dict_save = {}
         while True:
             try:
@@ -826,6 +815,7 @@ class Aggregator(multiprocessing.Process):
                         dict_save = save_data(dict_save, case=self.case,  folder=self.casefolder, filename='house.h5', summary=self.summary)
                         self.start_unixtime = self.dict_common['unixtime']
 
+                
                 time.sleep(self.pause)
             except Exception as e:
                 print("Error AGGREGATOR.baseload:", e)
@@ -855,20 +845,19 @@ class Aggregator(multiprocessing.Process):
         self.save_interval += np.random.randint(0,60)
 
         if (self.simulation==0):
-            while True:
-                try:
-                    import SENSIBO
-                    dict_a_mode = {'cool':0, 'heat':1, 'fan':2, 'dry':3, 'auto':4}  # actual mode
-                    self.sensibo_api = SENSIBO.SensiboClientAPI('srBysNj0K9o6De9acaSz8wrvS2Qpju')
-                    self.sensibo_devices = self.sensibo_api.devices()
-                    self.uid = self.sensibo_devices[f'ldc_heatpump_h{int(self.house_num)}']
-                    #self.sensibo_state = self.sensibo_api.pod_ac_state(self.uid)
-                    # self.sensibo_history = self.sensibo_api.pod_history(self.uid)
-                    self.sensibo_measurement = self.sensibo_api.pod_measurement(self.uid)
-                    break
-                except Exception as e:
-                    print(f"Error AGGREGATOR.heatpump.setup_sensibo:{e}")
-
+            try:
+                import SENSIBO
+                dict_a_mode = {'cool':0, 'heat':1, 'fan':2, 'dry':3, 'auto':4}  # actual mode
+                self.sensibo_api = SENSIBO.SensiboClientAPI('srBysNj0K9o6De9acaSz8wrvS2Qpju')
+                self.sensibo_devices = self.sensibo_api.devices()
+                self.uid = self.sensibo_devices[f'ldc_heatpump_h{int(self.house_num)}']
+                #self.sensibo_state = self.sensibo_api.pod_ac_state(self.uid)
+                # self.sensibo_history = self.sensibo_api.pod_history(self.uid)
+                self.sensibo_measurement = self.sensibo_api.pod_measurement(self.uid)
+                
+            except Exception as e:
+                print(f"Error AGGREGATOR.heatpump.setup_sensibo:{e}")
+                # time.sleep(3)
 
             # while True:
             #     try:
@@ -956,7 +945,7 @@ class Aggregator(multiprocessing.Process):
                 ### temporary calculation for indoor humidity
                 self.dict_heatpump['humidity_in'] = np.random.normal(1, 0.001, len(self.dict_heatpump['temp_in'])) * self.dict_common['humidity'] * 100
 
-                if self.simulation==0:
+                if self.simulation==0 and self.dict_common['unixtime']%30<1:
                     ### get actual sensibo state every 30 seconds
                     self.dict_heatpump['charging_counter'] = np.subtract(self.dict_heatpump['charging_counter'], self.dict_common['step_size'])
                     
@@ -965,6 +954,13 @@ class Aggregator(multiprocessing.Process):
                         self.sensibo_state = self.sensibo_api.pod_ac_state(self.uid)
                         # self.sensibo_history = self.sensibo_api.pod_history(self.uid)
                         self.sensibo_measurement = self.sensibo_api.pod_measurement(self.uid)
+
+                        ### update device states, e.g., temp_in, temp_mat, actual reading
+                        self.dict_heatpump['temp_in'] = np.asarray([self.sensibo_measurement['measurements']['temperature']]).reshape(-1)
+                        self.dict_heatpump['temp_mat'] = np.asarray([self.sensibo_measurement['measurements']['temperature']]).reshape(-1)
+                        self.dict_heatpump['temp_in_active'] = np.asarray([self.sensibo_measurement['measurements']['temperature']]).reshape(-1)
+                        ### indoor humidity (actual reading)
+                        self.dict_heatpump['humidity_in'] = np.asarray([self.sensibo_measurement['measurements']['humidity']]).reshape(-1)
                         
                         ### Actions
                         self.dict_heatpump['connected'] = np.ones(n_units)  ### ardmore heatpumps are always ON
@@ -984,26 +980,22 @@ class Aggregator(multiprocessing.Process):
                             ### implement targetTemperature adjustment
                             if (self.sensibo_state['targetTemperature']!=int(self.dict_heatpump['temp_target'][0])):
                                 self.sensibo_api.pod_change_ac_state(self.uid, self.sensibo_state, "targetTemperature", int(self.dict_heatpump['temp_target'][0]))
-                        time.sleep(30)
+                        
+                        
+                        ### additional data
+                        # self.dict_heatpump['mode'] = np.array([dict_a_mode[self.sensibo_state['mode']]])
+                        # self.dict_heatpump['temp_target'] = np.array([self.sensibo_state['targetTemperature']])
+    
                     except Exception as e:
                         print(f"Error AGGREGATOR.heatpump.sensibo_operation:{e}")
-                        time.sleep(5)
+                        # time.sleep(5)
                         ### reconnect to sensibo database
                         self.sensibo_api = SENSIBO.SensiboClientAPI('srBysNj0K9o6De9acaSz8wrvS2Qpju')
                         self.sensibo_devices = self.sensibo_api.devices()
                         self.uid = self.sensibo_devices[f'ldc_heatpump_h{int(self.house_num)}']
                         
                             
-                    ### update device states, e.g., temp_in, temp_mat, actual reading
-                    self.dict_heatpump['temp_in'] = np.array([self.sensibo_measurement[0]['temperature']])
-                    self.dict_heatpump['temp_mat'] = np.array([self.sensibo_measurement[0]['temperature']])
-                    self.dict_heatpump['temp_in_active'] = np.array([self.sensibo_measurement[0]['temperature']])
-                    ### indoor humidity (actual reading)
-                    self.dict_heatpump['humidity_in'] = np.array([self.sensibo_measurement[0]['humidity']])
-                    ### additional data
-                    # self.dict_heatpump['mode'] = np.array([dict_a_mode[self.sensibo_state['mode']]])
-                    # self.dict_heatpump['temp_target'] = np.array([self.sensibo_state['targetTemperature']])
-
+                    
                 
                 ### save data
                 if self.simulation and self.save_history:
@@ -1230,15 +1222,13 @@ class Aggregator(multiprocessing.Process):
 
 
                 ### get actual readings
-                if self.simulation==0:
+                if self.simulation==0 and self.dict_common['unixtime']%3<1:
                     response = MULTICAST.send(dict_msg={"pcsensor":"temp_in"}, ip=ip, port=port, timeout=timeout, hops=1)
                     if response:
-                        self.dict_waterheater['temp_in'][0] = response[ip]                                            
+                        self.dict_waterheater['temp_in'] = np.asarray(response[ip]).reshape(-1)
                     ### execute status
-                    execute_state(int(self.dict_waterheater['actual_status'][0]), device_id=self.device_ip, report=True)
-                    time.sleep(1)
-
-                
+                    execute_state(int(self.dict_waterheater['actual_status']), device_id=self.device_ip, report=True)
+                    
                                         
                 ### save data
                 if self.simulation and self.save_history:
@@ -1726,6 +1716,7 @@ class Aggregator(multiprocessing.Process):
 
                 ### update device states, e.g., temp_in, temp_mat, progress, soc, through simulation
                 enduse_battery(self.dict_storage)
+
                 
 
                 
@@ -1762,6 +1753,8 @@ class Aggregator(multiprocessing.Process):
                 common=self.dict_common,
                 )
             )
+        df_clearness = pd.read_pickle('/home/pi/ldc_project/ldc_simulator/profiles/clearness.pkl.xz', compression='infer')
+        
         self.save_interval += np.random.randint(0,60)
         dict_save = {}
         while True:
@@ -1773,15 +1766,7 @@ class Aggregator(multiprocessing.Process):
                 ### update common variables
                 update_from_common(self.dict_solar, self.dict_common)
                 
-
-                self.dict_solar = {**self.dict_solar, **dict(zip([
-                    'irradiance_roof', 
-                    # 'irradiance_wall1' , 
-                    # 'irradiance_wall2', 
-                    # 'irradiance_wall3', 
-                    # 'irradiance_wall4', 
-                    'actual_demand'], 
-                    [solar.get_irradiance(
+                self.dict_solar['irradiance_roof'] = solar.get_irradiance(
                             unixtime=self.dict_common['unixtime'],
                             humidity=self.dict_common['humidity'],
                             latitude=self.dict_solar['latitude'],
@@ -1790,55 +1775,20 @@ class Aggregator(multiprocessing.Process):
                             tilt=self.dict_solar['roof_tilt'],
                             azimuth=self.dict_solar['azimuth'],
                             albedo=self.dict_solar['albedo'],
-                            isotime=self.dict_common['isotime']),
-                    # solar.get_irradiance(
-                    #         unixtime=self.dict_common['unixtime'],
-                    #         humidity=self.dict_common['humidity'],
-                    #         latitude=self.dict_solar['latitude'],
-                    #         longitude=self.dict_solar['longitude'],
-                    #         elevation=self.dict_solar['elevation'],
-                    #         tilt=np.ones(len(self.dict_solar['azimuth']))*90,
-                    #         azimuth=self.dict_solar['azimuth'],
-                    #         albedo=self.dict_solar['albedo'],
-                    #         isotime=self.dict_common['isotime']),
-                    # solar.get_irradiance(
-                    #         unixtime=self.dict_common['unixtime'],
-                    #         humidity=self.dict_common['humidity'],
-                    #         latitude=self.dict_solar['latitude'],
-                    #         longitude=self.dict_solar['longitude'],
-                    #         elevation=self.dict_solar['elevation'],
-                    #         tilt=np.ones(len(self.dict_solar['azimuth']))*90,
-                    #         azimuth=self.dict_solar['azimuth']+90,
-                    #         albedo=self.dict_solar['albedo'],
-                    #         isotime=self.dict_common['isotime']),
-                    # solar.get_irradiance(
-                    #         unixtime=self.dict_common['unixtime'],
-                    #         humidity=self.dict_common['humidity'],
-                    #         latitude=self.dict_solar['latitude'],
-                    #         longitude=self.dict_solar['longitude'],
-                    #         elevation=self.dict_solar['elevation'],
-                    #         tilt=np.ones(len(self.dict_solar['azimuth']))*90,
-                    #         azimuth=self.dict_solar['azimuth']-90,
-                    #         albedo=self.dict_solar['albedo'],
-                    #         isotime=self.dict_common['isotime']),
-                    # solar.get_irradiance(
-                    #         unixtime=self.dict_common['unixtime'],
-                    #         humidity=self.dict_common['humidity'],
-                    #         latitude=self.dict_solar['latitude'],
-                    #         longitude=self.dict_solar['longitude'],
-                    #         elevation=self.dict_solar['elevation'],
-                    #         tilt=np.ones(len(self.dict_solar['azimuth']))*90,
-                    #         azimuth=self.dict_solar['azimuth']+180,
-                    #         albedo=self.dict_solar['albedo'],
-                    #         isotime=self.dict_common['isotime']),
-                    np.multiply(np.multiply(self.dict_solar['capacity'], 
-                            self.dict_solar['irradiance_roof']*1e-3), 
-                            self.dict_solar['inverter_efficiency'])*-1
-                    ]
-                    ))}
-                    
-                if abs(self.dict_common['hour']-12)<=1 and self.dict_common['minute']%5<=1:
-                    self.dict_solar['actual_demand'] = self.dict_solar['actual_demand'] *  0.2 #np.clip(np.random.normal(0.3, 0.1, self.dict_solar['actual_demand'].size), a_min=0.01, a_max=0.9)
+                            isotime=self.dict_common['isotime']
+                            )
+
+                self.dict_solar['irradiance_roof'] = self.dict_solar['irradiance_roof'] * np.random.normal(df_clearness.loc[self.dict_common['weekminute'], 'clearness'], 0.003)
+
+                
+                self.dict_solar['actual_demand'] = np.multiply(np.multiply(self.dict_solar['capacity'], self.dict_solar['irradiance_roof']/1e3), self.dict_solar['inverter_efficiency'])  * -1
+                # Note:  irradiance is divided by 1000 since pv rating is based on standard 1000W/m2 irradiance
+                
+                ### update ldc_dongle approval for the proposed status and demand
+                ldc_dongle(self.dict_solar, self.dict_common)
+
+                self.dict_solar['actual_demand'] = np.multiply(self.dict_solar['actual_demand'], 1.0-(np.clip(self.dict_solar['priority_offset']*0.1, a_min=0.0, a_max=1.0))).round(3)
+                
 
                 ### send data to main
                 self.pipe_agg_solar1.send(self.dict_solar)
@@ -2129,7 +2079,7 @@ class Aggregator(multiprocessing.Process):
                     self.dict_state.update(state)
                     for k, v in state.items():
                         if k.endswith('actual_demand'):
-                            self.dict_summary_demand.update({k:float(v)})
+                            self.dict_summary_demand.update({k:np.sum(v)})
 
                 ### add all demand except heatpump and waterheater demand
                 total = np.sum([np.sum(self.dict_summary_demand[k]) for k in self.dict_summary_demand.keys() if not (k.startswith('heatpump') or k.startswith('waterheater'))])
@@ -2171,7 +2121,8 @@ class Aggregator(multiprocessing.Process):
                     
                 ### save all states
                 self.dict_state.update({"unixtime": self.dict_common['unixtime'] })
-                self.dict_history.update({self.dict_common['unixtime']: self.dict_state})            
+                self.dict_history.update({self.dict_common['unixtime']: {k: np.asarray(v).reshape(-1)[0] for k, v in self.dict_state.items()}})
+                
                 self.dict_history = self.save_pickle(dict_data=self.dict_history, path=f'/home/pi/ldc_project/history/H{self.house_num}_{self.dict_common["today"]}.pkl')
                 ### compress saved data at start of new day
                 if self.dict_common['today']!=last_day:
@@ -2206,7 +2157,7 @@ class Aggregator(multiprocessing.Process):
     def save_pickle(dict_data, path='history/data.pkl.xz'):
         'Save data as pickle file.'
         try:
-            df_all = pd.DataFrame.from_dict(dict_data, orient='index').reset_index(drop=True).astype(float)
+            df_all = pd.DataFrame.from_dict(dict_data, orient='index').reset_index(drop=True)#.astype(float)
             try:
                 on_disk = pd.read_pickle(path, compression='infer').reset_index(drop=True)
                 df_all = pd.concat([on_disk, df_all], axis=0, sort=False).reset_index(drop=True)
@@ -2214,6 +2165,7 @@ class Aggregator(multiprocessing.Process):
                 df_all = df_all.groupby('unixtime').mean().reset_index(drop=False)
             except Exception as e:
                 pass
+
 
             df_all.to_pickle(path, compression='infer')
             return {}
@@ -2241,7 +2193,6 @@ class Aggregator(multiprocessing.Process):
         EM1 =  EnergyMeter(house=f'H{self.house_num}', IDs=[0])
         self.dict_meter = {}
         dict_history = {}
-        # last_day = datetime.datetime.now().strftime("%Y_%m_%d")
         while True:
             try:
                 dict_agg = self.pipe_agg_meter1.recv()
@@ -2254,10 +2205,6 @@ class Aggregator(multiprocessing.Process):
                 self.dict_meter.update(EM1.get_meter_data(report=self.report))  # NOTE: this step also pickles the data to disk
                 self.pipe_agg_meter1.send({'meter': self.dict_meter})
 
-                # ### compress file
-                # if self.dict_common['today']!=last_day:
-                #     self.compress_pickle(path=f'/home/pi/ldc_project/history/H{self.house_num}_{last_day}.pkl')
-                # last_day = self.dict_common['today']
                 time.sleep(self.pause)
             except KeyboardInterrupt:
                 print("meter stopped...")

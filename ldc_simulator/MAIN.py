@@ -572,6 +572,7 @@ if __name__ == '__main__':
         n_v2g = 0
         target = 'auto'
         
+        
         latitude = '-36.866590076725494'
         longitude = '174.77534779638677'
         start = time.time()

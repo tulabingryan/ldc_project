@@ -23,6 +23,7 @@ class Base():
         self.load_type = 'generic'
         self.dict_house = {}
         self.idx = 0
+        self.pause = 1e-6
         
 
         self.list_variable_states = [
@@ -35,6 +36,8 @@ class Base():
         ]
 
         self.dict_startcode = {
+            'baseload': 0,
+            'house': 0,
             'heater':3,
             'dishwasher':4,
             'clothesdryer':5,
@@ -51,19 +54,20 @@ class Base():
             'door':23,
             'human':27,
             'solar':28,
+            'wind': 29,
         }
 
-
+    
     def add_device(self, dict_devices, idx, distribution, dict_global_states):
-        self.n_house = dict_devices['house']['n_units']
-        self.n_units = dict_devices[self.load_type]['n_units']
-        self.n_ldc = dict_devices[self.load_type]['n_ldc']
-        # n_b2g = dict_devices[self.load_type]['n_b2g']
+        self.n_house = int(dict_devices['house']['n_units'])
+        self.n_units = int(dict_devices[self.load_type]['n_units'])
+        self.n_ldc = int(dict_devices[self.load_type]['n_ldc'])
+        n_b2g = int(dict_devices[self.load_type]['n_b2g'])
         self.dict_global_states = dict_global_states
 
         print(f'Creating {self.load_type} {self.n_units} units...')
         k = 'house' if self.load_type=='baseload' else self.load_type
-        
+
         with pd.HDFStore('./specs/device_specs.h5', 'r') as store:
             df = store.select(k, where='index>={} and index<{}'.format(idx, idx+self.n_units))
             if 'with_dr' in df.columns:
@@ -76,30 +80,131 @@ class Base():
                     df.loc[idxs[0:n_ldc], 'with_dr'] = 1
                     df.loc[idxs[n_ldc:], 'with_dr'] = 0
             
+            ### assign b2g
+            df['b2g'] = 0
+            idxs = df.index
+            if distribution=='per_device':
+                df['b2g'] = 0
+                selection = np.random.choice(idxs, n_b2g, replace=False)
+                df.loc[selection, 'b2g'] = 1
+            else:
+                df.loc[idxs[0:n_b2g], 'b2g'] = 1
+                df.loc[idxs[n_b2g:], 'b2g'] = 0
+
+        # self.dict_constant_states = df.to_dict(orient='list')
+        self.dict_variable_states = df.to_dict(orient='list')
+
+        for k, v in self.dict_variable_states.items():
+            # self.dict_constant_states[k] = np.asarray(v).reshape(-1)
+            self.dict_variable_states[k] = np.asarray(v).reshape(-1)
+
+
+    def initialize_states(self, house_instance):
+        '''
+        Initialize time-invariant states
+        '''
+        self.dict_variable_states['unixstart'] = np.random.normal(self.dict_global_states['unixtime'] - (self.dict_global_states['hour']*3600), 0.1, self.n_units)
+        self.dict_variable_states['unixend'] = np.random.normal(self.dict_global_states['unixtime'] - (self.dict_global_states['hour']*3600) + (3600*24), 0.1, self.n_units)
+        self.dict_variable_states['alpha'] = np.exp(np.ones(self.n_units)/60)
+        self.dict_variable_states['actual_demand'] = np.zeros(self.n_units)
+        self.dict_variable_states['house'] = house_instance.dict_variable_states['name'][np.asarray(np.arange(self.n_units)%house_instance.n_units, dtype=int).reshape(-1)]
+        self.dict_variable_states['schedule'] = house_instance.dict_variable_states['schedule'][np.asarray(np.arange(self.n_units)%house_instance.n_units, dtype=int).reshape(-1)]
+        self.dict_variable_states['load_type_id'] = np.ones(self.n_units) * self.dict_startcode[self.load_type]
+        self.dict_variable_states['old_signal'] = np.zeros(self.n_units)
+        self.dict_variable_states['ldc_signal'] = np.zeros(self.n_units)
+        if 'priority' not in self.dict_variable_states.keys(): 
+            self.dict_variable_states['priority'] = np.random.uniform(20, 80, self.n_units)
+        self.dict_variable_states['priority_offset'] = np.subtract(self.dict_variable_states['ldc_signal'], self.dict_variable_states['priority'])
             
+        if self.load_type in ['heatpump', 'heater']:
+            self.dict_variable_states['latitude'] = house_instance.dict_variable_states['latitude'][np.asarray(np.arange(self.n_units)%house_instance.n_units, dtype=int).reshape(-1)]
+            self.dict_variable_states['longitude'] = house_instance.dict_variable_states['longitude'][np.asarray(np.arange(self.n_units)%house_instance.n_units, dtype=int).reshape(-1)]
+            self.dict_variable_states['elevation'] = house_instance.dict_variable_states['elevation'][np.asarray(np.arange(self.n_units)%house_instance.n_units, dtype=int).reshape(-1)]
+            self.dict_variable_states['roof_tilt'] = house_instance.dict_variable_states['roof_tilt'][np.asarray(np.arange(self.n_units)%house_instance.n_units, dtype=int).reshape(-1)]
+            self.dict_variable_states['azimuth'] = house_instance.dict_variable_states['azimuth'][np.asarray(np.arange(self.n_units)%house_instance.n_units, dtype=int).reshape(-1)]
+            self.dict_variable_states['albedo'] = house_instance.dict_variable_states['albedo'][np.asarray(np.arange(self.n_units)%house_instance.n_units, dtype=int).reshape(-1)]
+            self.dict_variable_states['roof_area'] = house_instance.dict_variable_states['roof_area'][np.asarray(np.arange(self.n_units)%house_instance.n_units, dtype=int).reshape(-1)]
+            self.dict_variable_states['wall_area'] = house_instance.dict_variable_states['wall_area'][np.asarray(np.arange(self.n_units)%house_instance.n_units, dtype=int).reshape(-1)]
+            self.dict_variable_states['window_area'] = house_instance.dict_variable_states['window_area'][np.asarray(np.arange(self.n_units)%house_instance.n_units, dtype=int).reshape(-1)]
+            self.dict_variable_states['skylight_area'] = house_instance.dict_variable_states['skylight_area'][np.asarray(np.arange(self.n_units)%house_instance.n_units, dtype=int).reshape(-1)]
+            self.dict_variable_states['mass_flow'] = np.zeros(self.n_units)   
+            self.dict_variable_states['temp_target'] = self.dict_variable_states['heating_setpoint']
+            # self.dict_variable_states['temp_in'] = self.dict_variable_states['temp_target'] - np.abs((np.random.normal(0.0,0.1,self.n_units)*self.dict_variable_states['tolerance']))
+            self.dict_variable_states['solar_heat'] = np.zeros(self.n_units)
+            self.dict_variable_states['power_thermal'] = np.zeros(self.n_units)
+            self.dict_variable_states['heat_all'] = np.zeros(self.n_units)
+            self.dict_variable_states['temp_out'] = np.random.normal(self.dict_global_states['temp_out'], 0.01, self.n_units)
+            self.dict_variable_states['humidity'] = np.random.normal(self.dict_global_states['humidity'], 0.01, self.n_units)
+            self.dict_variable_states['humidity_in'] = self.dict_variable_states['humidity'] - np.random.normal(0.1, 0.001, self.n_units)
+            self.dict_variable_states['windspeed'] = np.random.normal(self.dict_global_states['windspeed'], 0.01, self.n_units)
             
-        #     ### assign b2g
-        #     df['b2g'] = 0
-        #     idxs = df.index
-        #     if distribution=='per_device':
-        #         df['b2g'] = 0
-        #         selection = np.random.choice(idxs, n_b2g, replace=False)
-        #         df.loc[selection, 'b2g'] = 1
-        #     else:
-        #         df.loc[idxs[0:n_b2g], 'b2g'] = 1
-        #         df.loc[idxs[n_b2g:], 'b2g'] = 0
 
-        self.dict_constant_states = df.to_dict(orient='list')
+        if self.load_type in ['fridge', 'freezer']:
+            self.dict_variable_states['mass_flow'] = np.zeros(self.n_units)
+            self.dict_variable_states['mode'] = np.zeros(self.n_units).astype(int)
+            self.dict_variable_states['temp_target'] = self.dict_variable_states['cooling_setpoint']
+            self.dict_variable_states['solar_heat'] = np.zeros(self.n_units)
+            self.dict_variable_states['power_thermal'] = np.zeros(self.n_units)
+            self.dict_variable_states['heat_all'] = np.zeros(self.n_units)
+            # air density is 1.225kg/m^3 at 15degC sea level
+            # air density is 1.2041 kg/m^3 at 20 degC sea level
+            # water density is 999.1 kg/m^3 at 15degC sea level
+        if self.load_type in ['heater', 'waterheater']:
+            self.dict_variable_states['mass_flow'] = np.zeros(self.n_units)
+            self.dict_variable_states['mode'] = np.ones(self.n_units)
+            self.dict_variable_states['temp_target'] = self.dict_variable_states['heating_setpoint']
+            self.dict_variable_states['temp_max'] = self.dict_variable_states['temp_target'] + (self.dict_variable_states['tolerance']*0.9)
+            # self.dict_variable_states['temp_in'] = self.dict_variable_states['temp_target'] - np.abs((np.random.normal(0.0,0.3,self.n_units)*self.dict_variable_states['tolerance']))
+            self.dict_variable_states['min_cycletime'] = np.random.uniform(1, 1.1, self.n_units)
+            self.dict_variable_states['solar_heat'] = np.zeros(self.n_units)
+            self.dict_variable_states['power_thermal'] = np.zeros(self.n_units)
+            self.dict_variable_states['heat_all'] = np.zeros(self.n_units)
+            # self.dict_variable_states['counter'] = np.random.uniform(2, 3, self.n_units)
+            # self.dict_variable_states['temp_in'] = np.random.normal(np.mean(self.dict_variable_states['temp_in']), np.std(self.dict_variable_states['temp_in']), self.n_units)
+
+        if self.load_type in ['storage']:
+            self.dict_variable_states['soc'] = np.clip(np.random.normal(0.5, 0.3, self.n_units), a_min=0.2, a_max=0.8)
+            self.dict_variable_states['progress'] = np.divide(self.dict_variable_states['soc'], self.dict_variable_states['target_soc'])
+            self.dict_variable_states['mode'] = np.zeros(self.n_units)
+            self.dict_variable_states['min_soc'] = np.random.uniform(0.2, 0.3, self.n_units)
+            self.dict_variable_states['target_soc'] = np.random.uniform(0.9, 0.95, self.n_units)
+            self.dict_variable_states['connected'] = np.ones(self.n_units)
+            self.dict_variable_states['charging_power'] = np.ones(self.n_units) * 7400
+            self.dict_variable_states['capacity'] = np.ones(self.n_units) * 13.0 * 1000 * 3600
+            self.dict_variable_states['b2g'] = np.ones(self.n_units)
+            
+        if self.load_type in ['ev', 'evehicle']:
+            self.dict_variable_states['soc'] = np.random.uniform(0.7, 0.8, self.n_units)
+            self.dict_variable_states['progress'] = np.divide(self.dict_variable_states['soc'], self.dict_variable_states['target_soc'])
+            self.dict_variable_states['min_soc'] = np.random.uniform(0.3, 0.4, self.n_units)
+            self.dict_variable_states['target_soc'] = np.random.uniform(0.9, 0.95, self.n_units)
+            self.dict_variable_states['connected'] = np.ones(self.n_units)
+            self.dict_variable_states['capacity'] = np.array([dict_ev[x]['capacity'] for x in self.dict_variable_states['profile']]) * 1000 * 3600
+            self.dict_variable_states['charging_power'] = np.array([dict_ev[x]['charging_power'] for x in self.dict_variable_states['profile']]) * 1000 
+            
+            self.dict_variable_states['daily_energy'] = np.multiply(np.clip(np.random.normal(0.6, 0.05, self.n_units), a_min=0.55, a_max=0.65), self.dict_variable_states['capacity']) #[Ws]
+            self.dict_variable_states['km_per_kwh'] = np.clip(np.random.normal(6.0, 0.1, self.n_units), a_min=4.225, a_max=6.76) #[km/kWh] 1kWh per 6.5 km avg 
+            self.dict_variable_states['trip_distance'] = np.multiply(self.dict_variable_states['km_per_kwh'], self.dict_variable_states['daily_energy']/1e3/3.6e3) # [km] avg daily trip
+            self.dict_variable_states['avg_speed'] = np.clip(np.random.normal(85, 10, self.n_units), a_min=50, a_max=100)  # [km/h]
+            self.dict_variable_states['trip_time'] = np.divide(self.dict_variable_states['trip_distance']*0.5, self.dict_variable_states['avg_speed']) #[hours] avg daily trip
+            self.dict_variable_states['driving_power'] = ((self.dict_variable_states['trip_distance']*0.5/self.dict_variable_states['trip_time']) / self.dict_variable_states['km_per_kwh']) * 1000 * -1 #[W]
+            self.dict_variable_states['unixstart'] = np.random.normal(self.dict_global_states['unixtime'] - (self.dict_global_states['hour']*3600) - (6*3600), 1800, self.n_units)
+            self.dict_variable_states['unixend'] = np.random.normal(self.dict_global_states['unixtime'] - (self.dict_global_states['hour']*3600) + (6*3600), 1800, self.n_units)
+            
+        if self.load_type in ['dishwasher', 'clothesdryer', 'clotheswasher']:
+            self.dict_variable_states['finished'] = np.ones(self.n_units)
+            self.dict_variable_states['unfinished'] = np.zeros(self.n_units) 
+            self.dict_variable_states['unixstart'] = np.random.normal(self.dict_global_states['unixtime'] - (self.dict_global_states['hour']*3600)- (3600*24) + (3600*18), 900, self.n_units)
+            self.dict_variable_states['unixend'] = np.random.normal(self.dict_global_states['unixtime'] - (self.dict_global_states['hour']*3600) - (3600*24) + (3600*21) , 900, self.n_units)
         
+        if self.load_type in ['solar', 'wind']:
+            self.dict_variable_states['mode'] = np.ones(self.n_units)  # generation modes are 1
+            self.dict_variable_states['priority'] = np.ones(self.n_units) * 90.0
+            self.dict_variable_states['connected'] = np.ones(self.n_units)
+            self.dict_variable_states['flexibility'] = np.ones(self.n_units) * 0.9
+            self.dict_variable_states['capacity'] = np.clip(np.round(np.random.normal(270*18, 270, self.n_units), -1), a_min=270*10, a_max=270*56)
 
-
-        # for k, v in dict_out.items():
-        #     dict_out[k] = np.array(v)
         
-        # dict_out['unixstart'] = np.random.normal(common['unixtime'] - (common['hour']*3600), 0.1, n_units)
-        # dict_out['unixend'] = np.random.normal(common['unixtime'] - (common['hour']*3600) + (3600*24), 0.1, n_units)
-        # dict_out['alpha'] = np.exp(np.ones(n_units)/60)
-        # dict_out['actual_demand'] = np.zeros(n_units)
         
 
     def step(self):
@@ -109,7 +214,7 @@ class Base():
         pass
 
     def __del__(self):
-        pass
+        print(f'Terminating {self.load_type}...')
 
 
 
@@ -127,16 +232,12 @@ class ThermostatControlledLoad(Base):
 
     def step(self):
         try:
-            # self.dict_global_states.update(self.pipe_agg_waterheater1.recv())
-            # if self.dict_global_states['is_alive']==False: 
-            #     raise KeyboardInterrupt
-            
-            # ### update common variables
-            # update_from_common(self.dict_variable_states, self.dict_global_states)
-            
             ### update weather
             self.dict_variable_states['temp_out'] = np.add(np.random.normal(0,0.01, self.n_units), self.dict_global_states['temp_out'])
-            
+            self.dict_variable_states['unixtime'] = np.ones(self.n_units)*self.dict_global_states['unixtime']
+            ### update schedules
+            update_schedules(self.dict_variable_states, self.dict_global_states)
+
             # ### update status of zone entrance/exit
             # self.dict_entry.update(update_device(n_device=1, 
             #     device_type='valve', 
@@ -157,7 +258,7 @@ class ThermostatControlledLoad(Base):
             
             ### update mass_flow, water density = 999.1 kg/m^3 (or 0.999 kg/liter) at 15 degC 101.325kPa (sea level)
             # self.dict_variable_states['mass_flow'] = np.multiply(self.dict_entry['valve0']['actual_status'], np.clip(np.random.normal(999.1*0.001*0.1, 0.01, self.n_units), a_min=0.01, a_max=0.25))  # assumed 0.1 L/s
-            self.dict_variable_states['mass_flow'] = np.add(self.dict_variable_states['mass_flow'], np.random.choice([0, 0.01], n_units, p=[0.9, 0.1]))
+            self.dict_variable_states['mass_flow'] = np.add(self.dict_variable_states['mass_flow'], np.random.choice([0, 0.01], self.n_units, p=[0.9, 0.1]))
             
             ### update device states, e.g., temp_in, temp_mat, through simulation
             enduse_tcl(self.dict_variable_states)
@@ -437,9 +538,10 @@ class Aggregator(Base):
     def __init__(self):
         super(Aggregator, self).__init__()
         Base.__init__(self)
+        self.load_type = 'aggregator'
         ### run common threads
         self.list_processes = [] 
-        self.list_load_instances = []
+        self.load_instances = {}
         self.common_observer = []
         self.agg_observer = []
         self.load_pipes = []
@@ -486,27 +588,73 @@ class Aggregator(Base):
     def create_network(self):
         pass
 
+    def add_house(self):
+        self.factor = 1
+        for load_type in dict_new_devices.keys():
+            n_units = dict_new_devices[load_type]['n_units']  # new devices
+            n_ldc = dict_new_devices[load_type]['n_ldc']
+            n_b2g = dict_new_devices[load_type]['n_b2g']
+            if load_type in self.dict_devices.keys():
+                idx = self.idx + self.dict_devices[load_type]['n_units']  # exisiting number of devices
+                self.dict_devices[load_type].update({
+                    'n_units': self.dict_devices[load_type]['n_units'] + n_units,
+                    'n_ldc': self.dict_devices[load_type]['n_ldc'] + n_ldc,
+                    'n_b2g': self.dict_devices[load_type]['n_b2g'] + n_b2g,
+                    })
+            else:
+                idx = self.idx
+                self.dict_devices.update({load_type:{ 'n_units': n_units, 'n_ldc': n_ldc, 'n_b2g': n_b2g}
+                    })  # update number of devices
+
+        ### create house data
+        if 'house' in self.dict_devices.keys():
+            n_units = self.dict_devices['house']['n_units']
+            idx = self.idx
+            with pd.HDFStore('./specs/device_specs.h5', 'r') as store:
+                df = store.select('house', where='index>={} and index<{}'.format(idx, idx+n_units))
+            self.dict_house.update(df.to_dict(orient='list'))
+            for k, v in self.dict_house.items():
+                self.dict_house[k] = np.array(v)
+            del df
+
+        ### loads to run
+        self.loads_to_run = [str(a) for a in self.dict_devices.keys() if a!='house']
+        self.loads_to_run.sort()
+
+
     def add_device(self, dict_devices, idx, distribution):
         # self.list_load_instances.append(eval('Waterheater()'))
         for k in dict_devices.keys():
-            self.list_load_instances.append(eval(f'{k}()'.capitalize()))
+            self.load_instances.update({k: eval(f'{k}()'.capitalize())})
         
-        for k in self.list_load_instances:
-            k.add_device(dict_devices, idx, distribution, self.dict_global_states)
+        for k, v in self.load_instances.items():
+            v.add_device(dict_devices, idx, distribution, self.dict_global_states)
 
-    def step(self):
-        ### update clock
-        t = time.perf_counter()
+    def initialize_states(self):
         self.dict_global_states.update(clock(unixtime=self.dict_global_states['unixtime'], 
                 step_size=self.dict_global_states['step_size'], 
                 realtime=self.dict_global_states['realtime']))
         ### update weather
         self.dict_global_states.update(self.weather.get_weather(self.dict_global_states['unixtime']))
 
+        for k, v in self.load_instances.items():
+            v.initialize_states(house_instance=self.load_instances['house'])
+
+    def step(self):
+        ### update clock
+        t = time.perf_counter()
+        self.dict_global_states.update(clock(unixtime=self.dict_global_states['unixtime'], step_size=self.dict_global_states['step_size'], realtime=self.dict_global_states['realtime']))
+        ### update weather
+        self.dict_global_states.update(self.weather.get_weather(self.dict_global_states['unixtime']))
         ### update tasks
-        for k in self.list_load_instances:
-            k.step()
-            # print(self.dict_global_states['unixtime'])
+        self.dict_global_states['current_task'] = self.df_schedules.iloc[self.dict_global_states['weekminute']]
+
+        ### update tasks
+        for k, v in self.load_instances.items():
+            v.step()
+
+        k = 'heatpump'
+        print(k, self.load_instances[k].dict_variable_states['temp_in'].mean())
         
         print(time.perf_counter()- t)
         
@@ -554,6 +702,7 @@ if 'storage' in devices_to_simulate:
 if __name__ == "__main__":
     b = Aggregator()
     b.add_device(dict_devices, idx, distribution)
-    for i in range(3):
+    b.initialize_states()
+    for i in range(10):
         b.step()
 

@@ -291,6 +291,18 @@ dict_params = {
     }
 
 monitored_params = dict_params.keys()
+enum_param = {
+    'waterheater': 'temp_in',
+    'heatpump': 'temp_in',
+    'heater': 'temp_in',
+    'freezer': 'temp_in',
+    'fridge': 'temp_in',
+    'clotheswasher': 'progress',
+    'clothesdryer': 'progress',
+    'dishwasher': 'progress',
+    'ev': 'soc',
+    'storage': 'soc'
+}
 
 def prepare_data(states, common):
     try:
@@ -320,6 +332,14 @@ def prepare_summary(states, common):
             if k in states_params:
                 for m in dict_params[k]:
                     payload.update({f'{m}_{k}': eval(f'np.{m}(states["{k}"]).round(5)')})
+
+        if (len(states['load_type'])>1):
+            pass
+        elif (states['load_type'][0] in ['baseload', 'wind', 'solar', 'house']):
+            pass
+        else:
+            {enum_param[states['load_type'][0]]: ','.join(np.char.zfill(states[enum_param[states['load_type'][0]]].round(3).astype(str), 7))}
+
         return {common['unixtime']: payload}
         
     except Exception as e:

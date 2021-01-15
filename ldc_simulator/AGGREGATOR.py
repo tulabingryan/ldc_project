@@ -113,7 +113,7 @@ class Aggregator(multiprocessing.Process):
             self.casefolder = casefolder
             self.target = target
             if target in ['auto', 'tou']:
-                self.target_loading = 20.0
+                self.target_loading = 30.0
             else:
                 self.target_loading = float(target)
         else:
@@ -269,7 +269,7 @@ class Aggregator(multiprocessing.Process):
         
 
         # run list_processes
-        self.dict_common.update({'is_alive': True, 'ldc_signal': 0.0})
+        self.dict_common.update({'is_alive': True, 'ldc_signal': 30.0})
         for t in self.list_processes:
             t.daemon = True
             t.start()
@@ -972,19 +972,19 @@ class Aggregator(multiprocessing.Process):
                                 self.sensibo_api.pod_change_ac_state(self.uid, self.sensibo_state, "on", True) 
                             elif self.dict_heatpump['connected'][0]==0 and self.sensibo_state['on']==True:
                                 self.sensibo_api.pod_change_ac_state(self.uid, self.sensibo_state, "on", False)
-                            ### change mode if needed 
-                            if self.dict_heatpump['mode'][0]==1 and self.sensibo_state['mode']=='cool':
-                                self.sensibo_api.pod_change_ac_state(self.uid, self.sensibo_state, "mode", "heat")  # change to heating
-                            elif self.dict_heatpump['mode'][0]==0 and self.sensibo_state['mode']=='heat':
-                                self.sensibo_api.pod_change_ac_state(self.uid, self.sensibo_state, "mode", "cool")  # change to cooling
+                            # ### change mode if needed 
+                            # if self.dict_heatpump['mode'][0]==1 and self.sensibo_state['mode']=='cool':
+                            #     self.sensibo_api.pod_change_ac_state(self.uid, self.sensibo_state, "mode", "heat")  # change to heating
+                            # elif self.dict_heatpump['mode'][0]==0 and self.sensibo_state['mode']=='heat':
+                            #     self.sensibo_api.pod_change_ac_state(self.uid, self.sensibo_state, "mode", "cool")  # change to cooling
                             ### implement targetTemperature adjustment
                             if (self.sensibo_state['targetTemperature']!=int(self.dict_heatpump['temp_target'][0])):
                                 self.sensibo_api.pod_change_ac_state(self.uid, self.sensibo_state, "targetTemperature", int(self.dict_heatpump['temp_target'][0]))
                         
                         
                         ### additional data
-                        # self.dict_heatpump['mode'] = np.array([dict_a_mode[self.sensibo_state['mode']]])
-                        # self.dict_heatpump['temp_target'] = np.array([self.sensibo_state['targetTemperature']])
+                        self.dict_heatpump['mode'] = np.asarray(dict_a_mode[self.sensibo_state['mode']]).reshape(-1)
+                        self.dict_heatpump['temp_target'] = np.asarray(self.sensibo_state['targetTemperature']).reshape(-1)
     
                     except Exception as e:
                         print(f"Error AGGREGATOR.heatpump.sensibo_operation:{e}")

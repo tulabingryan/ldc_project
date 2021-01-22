@@ -87,35 +87,71 @@ tab_selected_style = {
 }
 
 
-### ancillary functions ###
-def get_data(day=None, unixstart=None, unixend=None):
-    """ Fetch data from the local database"""
-    try:
-        if day:
-            df_data = pd.read_pickle(f'/home/pi/studies/ardmore/data/H{subnet}_{day}.pkl.xz', compression='infer')    
-        else:
-            if unixstart: 
-                daystart = pd.to_datetime(unixstart, unit='s').tz_localize('UTC').tz_convert('Pacific/Auckland').strftime('%Y_%m_%d')
-                df_data = pd.read_pickle(f'/home/pi/studies/ardmore/data/H{subnet}_{daystart}.pkl.xz', compression='infer')    
-            if unixend:
-                dayend = pd.to_datetime(unixstart, unit='s').tz_localize('UTC').tz_convert('Pacific/Auckland').strftime('%Y_%m_%d')
+# ### ancillary functions ###
+# def get_data(day=None, unixstart=None, unixend=None):
+#     """ Fetch data from the local database"""
+#     try:
+#         while True:
+#             if day:
+#                 df_data = pd.read_pickle(f'/home/pi/studies/ardmore/data/H{subnet}_{day}.pkl.xz', compression='infer')    
+#             else:
+#                 if unixstart: 
+#                     daystart = pd.to_datetime(unixstart, unit='s').tz_localize('UTC').tz_convert('Pacific/Auckland').strftime('%Y_%m_%d')
+#                     df_data = pd.read_pickle(f'/home/pi/studies/ardmore/data/H{subnet}_{daystart}.pkl.xz', compression='infer')    
+#                 if unixend:
+#                     dayend = pd.to_datetime(unixstart, unit='s').tz_localize('UTC').tz_convert('Pacific/Auckland').strftime('%Y_%m_%d')
 
-            if daystart!=dayend:
-                df = pd.read_pickle(f'/home/pi/studies/ardmore/data/H{subnet}_{dayend}.pkl.xz', compression='infer')     
-                df_data = pd.concat([df_data, df], axis=0)
-
-        float_cols = [x for x in df_data.columns if  not x.startswith('timezone')]
-        df_data = df_data[float_cols].astype(float)
-        df_data.index = pd.to_datetime(df_data['unixtime'].values, unit='s').tz_localize('UTC').tz_convert('Pacific/Auckland')
-        df_data = df_data.resample(f'1S').mean().interpolate()
-        return df_data
+#                 if daystart!=dayend:
+#                     df = pd.read_pickle(f'/home/pi/studies/ardmore/data/H{subnet}_{dayend}.pkl.xz', compression='infer')     
+#                     df_data = pd.concat([df_data, df], axis=0)
+#             break
+            
+#         float_cols = [x for x in df_data.columns if  not x.startswith('timezone')]
+#         df_data = df_data[float_cols].astype(float)
+#         df_data.index = pd.to_datetime(df_data['unixtime'].values, unit='s').tz_localize('UTC').tz_convert('Pacific/Auckland')
+#         df_data = df_data.resample(f'1S').mean().interpolate()
+#         return df_data
  
-    except Exception as e:
-        print(f"Error get_data:{e}")
+#     except Exception as e:
+#         print(f"Error get_data:{e}")
         
-        
+def get_files(from_path='pi@192.168.1.81:/home/pi/studies/ardmore/data', to_path='/home/pi/studies/ardmore/data'):
+    os.system(f'sshpass -p "ldc" rsync -avuhe ssh -T /home/pi {from_path} {to_path}')
+    return
     
 
+def get_data(day=None, unixstart=None, unixend=None, diagnostics=False):
+    """ Fetch data from the local database"""
+    while True:
+        try:
+            if day:
+                df_data = pd.read_pickle(f'/home/pi/studies/ardmore/data/H{subnet}_{day}.pkl.xz', compression='infer')    
+            else:
+                if unixstart: 
+                    daystart = pd.to_datetime(unixstart, unit='s').tz_localize('UTC').tz_convert('Pacific/Auckland').strftime('%Y_%m_%d')
+                    date_list = [daystart]
+                if unixend:
+                    dayend = pd.to_datetime(unixstart, unit='s').tz_localize('UTC').tz_convert('Pacific/Auckland').strftime('%Y_%m_%d')
+                    if daystart!=dayend:
+                        date_list = pd.date_range(start='2020-11-24', end='2020-11-30').astype(str)
+                    
+                df_data = pd.concat([pd.read_pickle(f'/home/pi/studies/ardmore/data/H{subnet}_{d}.pkl.xz', compression='infer') for d in date_list], axis=0)
+            
+            break
+        
+        except Exception as e:
+            if diagnostics: 
+                print(f"Error get_data:{e}")
+            pass
+        except KeyboardInterrupt:
+            break
+                
+    float_cols = [x for x in df_data.columns if  not x.startswith('timezone')]
+    df_data = df_data[float_cols].astype(float)
+    df_data.index = pd.to_datetime(df_data['unixtime'].values, unit='s').tz_localize('UTC').tz_convert('Pacific/Auckland')
+    df_data = df_data.resample(f'1S').mean().interpolate()
+    return df_data
+    
 
 
 

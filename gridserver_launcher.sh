@@ -9,6 +9,8 @@ export PATH=/home/pi/anaconda3/bin:$PATH && cd /home/pi/ldc_project/function_scr
 # export PATH=/home/pi/anaconda3/bin:$PATH && cd /home/pi/ldc_system/ && python AGG.py&  # aggregate data from simulation
 # run data logger
 export PATH=/home/pi/anaconda3/bin:$PATH && cd /home/pi/ldc_project/ldc_gridserver/ && python data_logger.py&  # save data to ldc_agg_melted.db
+# run log_compiler
+export PATH=/home/pi/anaconda3/bin:$PATH && cd /home/pi/ldc_project/ && python log_compiler.py& 
 # run grid server
 export PATH=/home/pi/anaconda3/bin:$PATH && cd /home/pi/ldc_project/ldc_gridserver/ &&  gunicorn grid_server:server -b :15003 &  # grid server gui
 # run load profile viewer

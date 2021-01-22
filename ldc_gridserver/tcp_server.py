@@ -36,6 +36,7 @@ class TcpServer(multiprocessing.Process):
         self.tcp_port = port
         self.mcast_ip = '224.0.2.3'
         self.mcast_port = 17001
+        self.multicast = False
         self.dict_serialports = self.get_ports()
         self.port_meters = self.dict_serialports['PID=0403']
         self.port_injector = self.dict_serialports['PID=067B']
@@ -88,7 +89,7 @@ class TcpServer(multiprocessing.Process):
 
         return dict_ports
 
-
+    
 
     def collect_data_meter(self):
         print("Collecting microgrid data_meter...")
@@ -129,19 +130,27 @@ class TcpServer(multiprocessing.Process):
 
     def collect_data_all(self):
         print("Aggregate data from meter and injector...")
-        list_p_kw = []
+        # list_p_kw = []
+        avg_w = None
+        a = 1/3600
+
         while self.dict_common['is_alive']:
             try:
                 if self.dict_meter:
                     self.dict_all.update(self.dict_meter)
                     # update running avg
-                    list_p_kw.append(self.dict_all['power_kw'])
-                    list_p_kw = list_p_kw[-3600:]  # maintain 3600 records
-                    avg = np.mean(list_p_kw) * 1000  # [watts]
+                    # list_p_kw.append(self.dict_all['power_kw'])
+                    # list_p_kw = list_p_kw[-3600:]  # maintain 3600 records
+                    # avg = np.mean(list_p_kw) * 1000  # [watts]
                     
-                    if ((self.dict_all['set_target']=='auto') and (int(time.time())%300==0)):
-                        self.injector.write_ldc_injector('s {}'.format(avg))
-                        self.dict_all.update({"target_watt":avg})
+                    if avg_w==None:
+                        avg_w = self.dict_all['power_kw'] * 1000
+                    else:
+                        avg_w = (avg_w*(1-a)) + (a*self.dict_all['power_kw']*1000)
+
+                    if ((self.dict_all['set_target']=='auto')): # and (int(time.time())%300==0)):
+                        self.injector.write_ldc_injector('s {}'.format(avg_w))
+                        self.dict_all.update({"target_watt": avg_w})
                   
                 if self.dict_injector:
                     self.dict_all.update(self.dict_injector)
@@ -170,7 +179,7 @@ class TcpServer(multiprocessing.Process):
                 dict_save.update({unixtime:self.dict_all.copy()})
                 
                 if len(dict_save.keys())>10:
-                    self.save_pickle(dict_data=dict_save, path=f'/home/pi/ldc_project/history/T1_{today}.pkl')
+                    dict_save = self.save_pickle(dict_data=dict_save, path=f'/home/pi/ldc_project/history/T1_{int(time.time()*1000)}.pkl.xz')
                 # self.df_all = pd.DataFrame.from_dict(self.dict_all, orient='index').T
                 # if len(self.df_all.index):
                 #   ### save csv melted format
@@ -181,7 +190,7 @@ class TcpServer(multiprocessing.Process):
                 #   with open(filename, 'a') as f:
                 #     df_agg.to_csv(f, mode='a', header=f.tell()==0, index=False)
                 #     time.sleep(1)
-                time.sleep(self.pause)
+                time.sleep(0.5)
             except Exception as e:
                 print("Error tcp_server.save_data:", e)
                 pass
@@ -203,7 +212,7 @@ class TcpServer(multiprocessing.Process):
                 # print(e)
                 pass
             df_all.to_feather(f'/home/pi/ldc_project/history/injector_{today}.feather')
-            print(df_data)
+            
             return {}
         except Exception as e:
             print("Error data_logger.save_feather:", e)
@@ -213,20 +222,21 @@ class TcpServer(multiprocessing.Process):
     def save_pickle(self, dict_data, path='history/data.pkl'):
         'Save data as pickle file.'
         try:
-            df_all = pd.DataFrame.from_dict(dict_data, orient='index').reset_index(drop=True)
-            try:
-                on_disk = pd.read_pickle(path, compression='infer').reset_index(drop=True)
-                df_all = pd.concat([on_disk, df_all], axis=0, sort=False).reset_index(drop=True)
-                df_all = df_all.groupby('unixtime').mean().reset_index(drop=False)
-                # df_all['unixtime'] = df_all['unixtime'].astype(int)
-                df_all.to_pickle(path, compression='infer')
-            except Exception as e:
-                df_all.to_pickle(path, compression='infer')
+            df_all = pd.DataFrame.from_dict(dict_data, orient='index')#.reset_index(drop=True)
+            df_all.to_pickle(path, compression='infer')
+            # try:
+            #     on_disk = pd.read_pickle(path, compression='infer').reset_index(drop=True)
+            #     df_all = pd.concat([on_disk, df_all], axis=0, sort=False).reset_index(drop=True)
+            #     df_all = df_all.groupby('unixtime').mean().reset_index(drop=False)
+            #     # df_all['unixtime'] = df_all['unixtime'].astype(int)
+            #     df_all.to_pickle(path, compression='infer')
+            # except Exception as e:
+            #     df_all.to_pickle(path, compression='infer')
         
             return {}
         except Exception as e:
             print("Error tcp_server.save_pickle:", e)
-            return dict_data 
+            return {} # dict_data 
 
 
 
@@ -255,24 +265,33 @@ class TcpServer(multiprocessing.Process):
             print("Error:", e)
             return 
 
+    def connect_udp_socket(self, ip, port, multicast=True):
+        'Setup socket connection'
+        while True:
+            try:
+                if multicast: ip=self.mcast_ip
+                udp_address_port = (ip, port)
+                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                # sock.settimeout(60)  
+                sock.bind(udp_address_port)
+                if multicast:
+                    group = socket.inet_aton(ip)
+                    mreq = struct.pack('4sL', group, socket.INADDR_ANY)
+                    sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP,mreq)
+                print(f'socket created: {udp_address_port}')
+                return sock
+            except Exception as e:
+                print("Error in AGGREGATOR.connect_udp_socket:",e)
+                print("Retrying...")
+                time.sleep(3)
+
 
     def udp_com(self):
-        # Receive and respond to query from the group
-        multicast_group = (self.mcast_ip, self.mcast_port)  # (ip_address, port)
-        # create the socket
-        udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-        udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        # Bind to the server address
-        udp_sock.bind(multicast_group)
-        # add socket to the multicast group
-        group = socket.inet_aton(self.mcast_ip)
-        mreq = struct.pack('4sL', group, socket.INADDR_ANY)
-        udp_sock.setsockopt(
-          socket.IPPROTO_IP,
-          socket.IP_ADD_MEMBERSHIP,
-          mreq)
+        udp_sock = self.connect_udp_socket(ip=self.tcp_ip, port=self.tcp_port, multicast=False)
         
         translate_cmd = {"s":"target_watt", "o":"signal", "k":"gain"}
+
         # Receive/respond loop
         while self.dict_common['is_alive']:
             dict_response= {}
@@ -327,8 +346,10 @@ class TcpServer(multiprocessing.Process):
             print('starting tcp_comm on {} port {}'.format(*server_address))
             tcp_sock.bind(server_address)
             # Listen for incoming connections
-            tcp_sock.listen(500)
-      
+            tcp_sock.listen(50)
+
+            translate_cmd = {"s":"target_watt", "o":"signal", "k":"gain"}
+
             while self.dict_common['is_alive']:
                 connection, client_address = tcp_sock.accept()  # wait for connection
                 try:
@@ -345,8 +366,9 @@ class TcpServer(multiprocessing.Process):
                                     k = dict_msg['states']
                                     if k=='all':
                                         message_toSend = str(self.dict_all).replace("'", "\"").encode()
+                                        
                                     elif k in self.dict_all.keys():
-                                        message_toSend = str({k:self.dict_all[k]}).encode()
+                                        message_toSend = str({k:self.dict_all[k]}).encode()              
                                     ### send data
                                     connection.sendall(message_toSend)
                           
@@ -356,12 +378,22 @@ class TcpServer(multiprocessing.Process):
                                     ### write command to ldc injector serial port
                                     self.injector.write_ldc_injector(dict_msg['cmd'])
                                     ### send confirmation
-                                    connection.sendall(str({"Confirmed":dict_msg['cmd']}).encode())
-
+                                    message_toSend = str({'cmd':dict_msg['cmd']}).encode()
+                                    ### send data
+                                    connection.sendall(message_toSend)
+                          
                                 if 'algorithm' in keys:
-                                    self.dict_all.update(dict_msg)
-                                    ### send confirmation
-                                    connection.sendall(str({"Confirmed":dict_msg}).encode())
+                                    self.dict_all.update({"algorithm":dict_msg["algorithm"]})
+                                    message_toSend = str({"target_watt":self.dict_all["target_watt"]}).encode()
+                                    ### send data
+                                    connection.sendall(message_toSend)
+                          
+                                if 'set_target' in keys:
+                                    self.dict_all.update({"set_target":dict_msg["set_target"]})
+                                    message_toSend = str({"set_target":self.dict_all["set_target"]}).encode()
+                                    ### send data
+                                    connection.sendall(message_toSend)
+                          
 
                             except BrokenPipeError:
                                 break
@@ -411,6 +443,10 @@ class TcpServer(multiprocessing.Process):
     def __del__(self):
         self.dict_common.update({"is_alive":False})
         print("Deleted:", self.name)
+        for t in self.list_processes:
+            if t.is_alive():
+                t.terminate()
+        
 
 
 

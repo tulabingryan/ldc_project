@@ -88,7 +88,7 @@ class LdcInjector(multiprocessing.Process):
 
     
     
-    def read_ldc_injector(self, report=False):
+    def read_ldc_injector(self, report=False, diagnostics=False):
         # read data from rs232
         dict_data = {}
         
@@ -99,20 +99,24 @@ class LdcInjector(multiprocessing.Process):
                     self.ser.reset_output_buffer()
              
                     response = self.ser.readline().decode('utf-8')
-                    p, power, csum, k, x = response.split()
-                    # print(p, power, csum, k, x)
+                    data_readings = response.split()
 
-                    dict_data.update({
-                        "unixtime": time.time(),
-                        "power_kw": float(power) * 1e-3,
-                        "csum": float(csum),
-                        "signal": min([float(x)*(-0.199733273641597) + 1798.24514853189, 850.0]), 
-                        "k": float(k),
-                        })
+                    if len(data_readings)==5:
+                        dict_data.update({
+                            "unixtime": time.time(),
+                            "power_kw": float(data_readings[1]) * 1e-3,
+                            "csum": float(data_readings[2]),
+                            "signal": min([float(data_readings[4])*(-0.199733273641597) + 1798.24514853189, 850.0]), 
+                            "k": float(data_readings[3]),
+                            })
+                        
+                        self.power_kw = dict_data['power_kw']
                     
-                    if report:print(dict_data)
 
-                    self.power_kw = dict_data['power_kw']
+                    if report: 
+                        print(dict_data)
+
+                    
                     break
 
                 except KeyboardInterrupt:
@@ -120,7 +124,8 @@ class LdcInjector(multiprocessing.Process):
                 except BrokenPipeError:
                     break
                 except Exception as e:
-                    #print("Error read_ldc_injector loop:", e)
+                    if diagnostics: 
+                        print("Error read_ldc_injector loop:", e)
                     dict_data = {}
 
             return dict_data

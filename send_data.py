@@ -62,7 +62,7 @@ def compress_pickle(path):
 #         print("Error compress_pickle:", e)
         
 
-def sync_files(dict_paths, remove_source=False, options='-auzhe'):
+def sync_files(from_path, to_path, remove_source=False, options='-auzhe'):
     '''
     -v, –verbose                             Verbose output
     -q, –quiet                                  suppress message output
@@ -77,16 +77,16 @@ def sync_files(dict_paths, remove_source=False, options='-auzhe'):
     -h, –human-readable            display the output numbers in a human-readable format
     –progress                                 show the sync progress during transfer
     '''
-    for from_path, to_path in dict_paths.items():
-        try:
-            if remove_source:
-                os.system(f'sshpass -p "ldc" rsync {options} ssh --remove-source-files {from_path} {to_path}') 
-            else:
-                os.system(f'sshpass -p "ldc" rsync {options} ssh -T /home/pi --quiet --exclude-from ".send_data-exluded" {from_path} {to_path}')
-        except Exception as e:
-            print("Error:", e, from_path, to_path)
 
-            
+    try:
+        if remove_source:
+            os.system(f'sshpass -p "ldc" rsync {options} ssh -T /home/pi --quiet --remove-source-files {from_path} {to_path}') 
+        else:
+            os.system(f'sshpass -p "ldc" rsync {options} ssh -T /home/pi --quiet --exclude-from ".send_data-exluded" {from_path} {to_path}')
+    except Exception as e:
+        print("Error:", e, from_path, to_path)
+
+        
 
 def get_local_ip(report=False):
     # get local ip address
@@ -107,71 +107,90 @@ def get_local_ip(report=False):
 
 def send_data():
     parser = OptionParser(version=' ')
-    parser.add_option('-n', '--n', dest='n', default=0, help='now')
+    parser.add_option('-n', '--now', dest='n', default=0, help='now')
     options, args = parser.parse_args(sys.argv[1:])
-    dict_paths={
-                '/home/pi/ldc_project/history/': 'pi@192.168.1.81:/home/pi/studies/ardmore/data/',
-                '/home/pi/ldc_project/logs/': 'pi@192.168.1.81:/home/pi/studies/ardmore/logs/',
-                'pi@192.168.1.81:/home/pi/ldc_project/ldc_gridserver/dict_cmd.txt': '/home/pi/ldc_project/ldc_simulator/dict_cmd.txt',
-                }
 
-    interval = 1
-
+    interval = 0.1
+    print(f"Sending data logs to server...")
     if not options.n:
-        print(f'sending files quitely every {interval}s...')
-        for from_path, to_path in dict_paths.items():
-            print(f'    {from_path} ---> {to_path}')
+        rsync_options = '-avuhe'
+    else:
+        rsync_options = '-q'
 
-    last_edit = time.time()
+    
+
     while True:
         try:
-            local_ip = get_local_ip()  # ensures network connection
-            now = datetime.datetime.now()
-            dt = now.timetuple()
-            today = now.strftime('%Y_%m_%d')
-            
-            ### convert 
-            if options.n:
-                print("sending files now...")
-                sync_files(dict_paths={
-                    '/home/pi/ldc_project/history/':'pi@192.168.1.81:/home/pi/studies/ardmore/data/',
-                    '/home/pi/ldc_project/logs/':'pi@192.168.1.81:/home/pi/studies/ardmore/logs/',
-                    '/home/pi/ldc_project/ldc_homeserver/history/':'pi@192.168.1.81:/home/pi/studies/ardmore/homeserver/',
-                    }, options='-avuhe', remove_source=False)
-            elif ((dt.tm_hour==23) and (dt.tm_min>=55)):
-                delete_old('/home/pi/ldc_project/logs/*', n_retain=0)
-                delete_old('/home/pi/ldc_project/history/*', n_retain=5)
-                delete_old('/home/pi/ldc_project/ldc_homeserver/history/*', n_retain=5)
-            else:
-                for p in glob.glob(f'/home/pi/ldc_project/history/*{today}.pkl'):
-                    if last_edit < os.stat(p).st_mtime:
-                        last_edit = os.stat(p).st_mtime
-                        compress_pickle(p)
+            t = time.perf_counter()
 
-                        sync_files(
-                            dict_paths={
-                                '/home/pi/ldc_project/history/': 'pi@192.168.1.81:/home/pi/studies/ardmore/data/',
-                                'pi@192.168.1.81:/home/pi/ldc_project/ldc_gridserver/dict_cmd.txt': '/home/pi/ldc_project/ldc_simulator/dict_cmd.txt',
-                                },
-                            remove_source=False)
-                        
-                if now.second == 0:  # only send every minute
-                    for p in glob.glob(f'/home/pi/ldc_project/logs/*'):
-                        if os.stat(p).st_mtime > (time.time()-60):  ### sync only if updated recently
-                            sync_files(
-                                dict_paths={'/home/pi/ldc_project/logs/': 'pi@192.168.1.81:/home/pi/studies/ardmore/logs/'},
-                                remove_source=False)
+            ### send data logs
+            files_to_send = glob.glob(f'/home/pi/ldc_project/history/*.pkl.xz')
+            files_to_send.sort(key=os.path.getmtime)
+            files_to_send = files_to_send[::-1]
+            for f in files_to_send[1:]:
+                from_path = f
+                to_path = f'pi@192.168.1.81:/home/pi/studies/ardmore/temp/{f.split("/")[-1]}'
+                sync_files(from_path=from_path, to_path=to_path, 
+                    remove_source=True, options=rsync_options)
             
-                            if os.stat(p).st_size >= 1e6: # 1MB limit
-                                os.system(f'sudo rm {p}')
-                                os.system('sudo reboot')  # reboot the system
+            ### send error logs
+            files_to_send = glob.glob(f'/home/pi/ldc_project/logs/*')
+            files_to_send.sort(key=os.path.getmtime)
+            files_to_send = files_to_send[::-1]
+            for f in files_to_send:
+                from_path = f
+                to_path = f'pi@192.168.1.81:/home/pi/studies/ardmore/logs/{f.split("/")[-1]}'
+                sync_files(from_path=from_path, to_path=to_path, 
+                    remove_source=True, options=rsync_options)
+            
+
+            # local_ip = get_local_ip()  # ensures network connection
+            # now = datetime.datetime.now()
+            # dt = now.timetuple()
+            # today = now.strftime('%Y_%m_%d')
+            
+            # ### convert 
+            # if options.n:
+            #     print("sending files now...")
+            #     sync_files(dict_paths={
+            #         '/home/pi/ldc_project/history/':'pi@192.168.1.81:/home/pi/studies/ardmore/data/',
+            #         '/home/pi/ldc_project/logs/':'pi@192.168.1.81:/home/pi/studies/ardmore/logs/',
+            #         '/home/pi/ldc_project/ldc_homeserver/history/':'pi@192.168.1.81:/home/pi/studies/ardmore/homeserver/',
+            #         }, options='-avuhe', remove_source=False)
+            # elif ((dt.tm_hour==23) and (dt.tm_min>=55)):
+            #     delete_old('/home/pi/ldc_project/logs/*', n_retain=0)
+            #     delete_old('/home/pi/ldc_project/history/*', n_retain=5)
+            #     delete_old('/home/pi/ldc_project/ldc_homeserver/history/*', n_retain=5)
+            # else:
+            #     for p in glob.glob(f'/home/pi/ldc_project/history/*{today}.pkl'):
+            #         if last_edit < os.stat(p).st_mtime:
+            #             last_edit = os.stat(p).st_mtime
+            #             compress_pickle(p)
+
+            #             sync_files(
+            #                 dict_paths={
+            #                     '/home/pi/ldc_project/history/': 'pi@192.168.1.81:/home/pi/studies/ardmore/data/',
+            #                     'pi@192.168.1.81:/home/pi/ldc_project/ldc_gridserver/dict_cmd.txt': '/home/pi/ldc_project/ldc_simulator/dict_cmd.txt',
+            #                     },
+            #                 remove_source=False)
+                        
+            #     if now.second%60<1:  # only send every minute
+            #         for p in glob.glob(f'/home/pi/ldc_project/logs/*'):
+            #             if os.stat(p).st_mtime > (time.time()-60):  ### sync only if updated recently
+            #                 sync_files(
+            #                     dict_paths={'/home/pi/ldc_project/logs/': 'pi@192.168.1.81:/home/pi/studies/ardmore/logs/'},
+            #                     remove_source=False)
+            
+            #                 if os.stat(p).st_size >= 1e6: # 1MB limit
+            #                     os.system(f'sudo rm {p}')
+            #                     os.system('sudo reboot')  # reboot the system
                         
 
                 
-
+            # print(time.perf_counter() - t)
             time.sleep(interval)
         except Exception as e:
-            # print(f"{datetime.datetime.now().isoformat()} Error send_data: {e}")
+            print(f"Error send_data: {e}")
             pass
         except KeyboardInterrupt:
             break

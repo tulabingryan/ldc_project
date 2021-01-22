@@ -439,6 +439,9 @@ class Aggregator(multiprocessing.Process):
                     ### update dict_cmd
                     try:
                         self.dict_common.update(read_json('/home/pi/ldc_project/ldc_simulator/dict_cmd.txt'))
+                        response = MULTICAST.send(dict_msg={'states':'algorithm'}, ip='192.168.1.3', port=10000, timeout=0.5, data_bytes=8192, hops=1)
+                        for k, v in response.items():
+                            self.dict_common.update(v)
                     except:
                         pass
 
@@ -2123,12 +2126,13 @@ class Aggregator(multiprocessing.Process):
                 self.dict_state.update({"unixtime": self.dict_common['unixtime'] })
                 self.dict_history.update({self.dict_common['unixtime']: {k: np.asarray(v).reshape(-1)[0] for k, v in self.dict_state.items()}})
                 
-                self.dict_history = self.save_pickle(dict_data=self.dict_history, path=f'/home/pi/ldc_project/history/H{self.house_num}_{self.dict_common["today"]}.pkl')
+                # self.dict_history = self.save_pickle(dict_data=self.dict_history, path=f'/home/pi/ldc_project/history/H{self.house_num}_{self.dict_common["today"]}.pkl')
                 ### compress saved data at start of new day
-                if self.dict_common['today']!=last_day:
-                    self.compress_pickle(path=f'/home/pi/ldc_project/history/H{self.house_num}_{last_day}.pkl')
-                last_day = self.dict_common['today']
+                # if self.dict_common['today']!=last_day:
+                #     self.compress_pickle(path=f'/home/pi/ldc_project/history/H{self.house_num}_{last_day}.pkl')
+                # last_day = self.dict_common['today']
 
+                self.dict_history = self.save_pickle(dict_data=self.dict_history, path=f'/home/pi/ldc_project/history/H{self.house_num}_{int(time.time()*1000)}.pkl.xz')
 
                 ### update peer address
                 if (self.dict_common['unixtime']%60 < 1):
@@ -2157,21 +2161,21 @@ class Aggregator(multiprocessing.Process):
     def save_pickle(dict_data, path='history/data.pkl.xz'):
         'Save data as pickle file.'
         try:
-            df_all = pd.DataFrame.from_dict(dict_data, orient='index').reset_index(drop=True)#.astype(float)
-            try:
-                on_disk = pd.read_pickle(path, compression='infer').reset_index(drop=True)
-                df_all = pd.concat([on_disk, df_all], axis=0, sort=False).reset_index(drop=True)
-                df_all['unixtime'] = df_all['unixtime'].astype(int)
-                df_all = df_all.groupby('unixtime').mean().reset_index(drop=False)
-            except Exception as e:
-                pass
+            df_all = pd.DataFrame.from_dict(dict_data, orient='index')#.reset_index(drop=True)#.astype(float)
+            # try:
+            #     on_disk = pd.read_pickle(path, compression='infer').reset_index(drop=True)
+            #     df_all = pd.concat([on_disk, df_all], axis=0, sort=False).reset_index(drop=True)
+            #     df_all['unixtime'] = df_all['unixtime'].astype(int)
+            #     df_all = df_all.groupby('unixtime').mean().reset_index(drop=False)
+            # except Exception as e:
+            #     pass
 
 
             df_all.to_pickle(path, compression='infer')
             return {}
         except Exception as e:
             print("Error save_pickle:", e)
-            return dict_data 
+            return {} #dict_data 
 
     @staticmethod
     def compress_pickle(path):
@@ -2189,8 +2193,15 @@ class Aggregator(multiprocessing.Process):
 
 
     def meter(self):
+        meters = []  # holder of all meter instances
+
         from METER import EnergyMeter
-        EM1 =  EnergyMeter(house=f'H{self.house_num}', IDs=[0])
+        meters.append(EnergyMeter(house=f'H{self.house_num}', IDs=[0]))
+        
+        if self.house_num in [4, 5]:
+            from pvcom import SolarMonitor
+            meters.append(SolarMonitor(house_id=f'H{self.house_num}'))
+
         self.dict_meter = {}
         dict_history = {}
         while True:
@@ -2201,8 +2212,12 @@ class Aggregator(multiprocessing.Process):
                 if self.dict_common['is_alive']==False: 
                     raise KeyboardInterrupt
                 
+                
                 ### get meter data
-                self.dict_meter.update(EM1.get_meter_data(report=self.report))  # NOTE: this step also pickles the data to disk
+                for m in meters:
+                    self.dict_meter.update(m.get_meter_data(report=self.report))  
+                
+
                 self.pipe_agg_meter1.send({'meter': self.dict_meter})
 
                 time.sleep(self.pause)

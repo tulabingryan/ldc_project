@@ -239,34 +239,39 @@ def get_start_date(db_name='/home/pi/ldc_project/ldc_gridserver/ldc_agg_melted.d
 #     return df_data
 
 
-def get_data(day=None, unixstart=None, unixend=None):
+def get_data(day=None, unixstart=None, unixend=None, diagnostics=False):
     """ Fetch data from the local database"""
-    try:
-        if day:
-            df_data = pd.read_pickle(f'/home/pi/studies/ardmore/data/T1_{day}.pkl.xz', compression='infer')    
-        else:
-            if unixstart: 
-                daystart = pd.to_datetime(unixstart, unit='s').tz_localize('UTC').tz_convert('Pacific/Auckland').strftime('%Y_%m_%d')
-                date_list = [daystart]
-            if unixend:
-                dayend = pd.to_datetime(unixstart, unit='s').tz_localize('UTC').tz_convert('Pacific/Auckland').strftime('%Y_%m_%d')
-                if daystart!=dayend:
-                    date_list = pd.date_range(start='2020-11-24', end='2020-11-30').astype(str)
-                
+    while True:
+        try:
+            if day:
+                df_data = pd.read_pickle(f'/home/pi/studies/ardmore/data/T1_{day}.pkl.xz', compression='infer')    
+            else:
+                if unixstart: 
+                    daystart = pd.to_datetime(unixstart, unit='s').tz_localize('UTC').tz_convert('Pacific/Auckland').strftime('%Y_%m_%d')
+                    date_list = [daystart]
+                if unixend:
+                    dayend = pd.to_datetime(unixstart, unit='s').tz_localize('UTC').tz_convert('Pacific/Auckland').strftime('%Y_%m_%d')
+                    if daystart!=dayend:
+                        date_list = pd.date_range(start='2020-11-24', end='2020-11-30').astype(str)
                     
-            df_data = pd.concat([pd.read_pickle(f'/home/pi/studies/ardmore/data/T1_{d}.pkl.xz', compression='infer') for d in date_list], axis=0)
-
+                df_data = pd.concat([pd.read_pickle(f'/home/pi/studies/ardmore/data/T1_{d}.pkl.xz', compression='infer') for d in date_list], axis=0)
+            
+            break
         
-        float_cols = [x for x in df_data.columns if  not x.startswith('timezone')]
-        # df_data = df_data[float_cols].astype(float)
-        df_data.index = pd.to_datetime(df_data['unixtime'].values, unit='s').tz_localize('UTC').tz_convert('Pacific/Auckland')
-        # df_data = df_data.resample(f'1S').mean() 
-        # df_data = df_data[(df_data['unixtime']>=unixstart)&(df_data['unixtime']<=unixend)]
-        print(df_data.tail(10))
-        return df_data
- 
-    except Exception as e:
-        print(f"Error get_data:{e}")
+        except Exception as e:
+            if diagnostics: 
+                print(f"Error get_data:{e}")
+            pass
+        except KeyboardInterrupt:
+            break
+                
+    # float_cols = [x for x in df_data.columns if  not x.startswith('timezone')]
+    # df_data.index = pd.to_datetime(df_data['unixtime'].values, unit='s').tz_localize('UTC').tz_convert('Pacific/Auckland')
+    # df_data = df_data.resample(f'1S').mean() 
+    # df_data = df_data[(df_data['unixtime']>=unixstart)&(df_data['unixtime']<=unixend)]
+    # print(df_data.tail(10))
+    return df_data
+    
         
         
     
@@ -301,42 +306,35 @@ def contact_server_udp(dict_msg, ip, port, timeout=1, hops=1):
 
 
 
-def send_command(dict_cmd, ip='localhost', port=10000, report=True, timeout=0.5):
+def send_command(dict_cmd, ip='192.168.1.3', port=10000, report=True, timeout=0.1):
     try:
-        response = MULTICAST.send(dict_cmd, ip="224.0.2.3", port=17001, timeout=timeout)
-        if report:
-            print('sent:', dict_cmd)
-            print('confirmation:',response)
-        return response
+        # ip="224.0.2.3"
+        response = MULTICAST.send(dict_cmd, ip=ip, port=port, timeout=timeout)
+        for k, v in response.items():
+            if report:
+                print('sent:', dict_cmd)
+                print('confirmation:', response)
+            return v
     except Exception as e:
         print("Error send_command:{}".format(e))
-        return
-  # try:
-  #     # Create a TCP/IP socket
-  #     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        return {}
 
-  #     # Connect the socket to the port where the server is listening
-  #     server_address = (ip, port)
-  #     sock.connect(server_address)
-    
-  #     message_toSend = str(dict_cmd).encode()
-  #     # send message
-  #     sock.sendall(message_toSend)
-    
-  #     # receive response
-  #     data = sock.recv(2**16)
-  #     received_msg = data.decode("utf-8")
-  #     print("Injector response:", received_msg)
-  #     dict_msg = ast.literal_eval(received_msg)
-  #     # print('received {!r}'.format(dict_msg))
-        
-  # except Exception as e:
-  #     dict_msg = {}
+    # try:
+    #     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # Create a TCP/IP socket
+    #     sock.connect((ip, port))  # Connect the socket to the port where the server is listening
+    #     sock.sendall(str(dict_cmd).encode())  # send message
+    #     # receive response
+    #     data = sock.recv(4096)
+    #     response = data.decode("utf-8")
+    #     if report:
+    #         print(f"sent: {dict_cmd}")
+    #         print(f"confirmation: {response}")
+    # except Exception as e:
+    #     response = {}
+    # finally:
+    #     sock.close()
 
-  # finally:
-  #     sock.close()
-
-  # return dict_msg
+    # return response
 
 
 def get_local_ip():
@@ -441,13 +439,17 @@ while len(dict_cmd.keys())<=0:
             "history": 'Last 15 Minutes',
             "gain": 32
             }
-        # print("Error initial command:", e)
-    cmd_target_watt = float(dict_cmd['target_watt'])
-    cmd_algorithm = dict_cmd['algorithm']
-    ldc_signal = float(dict_cmd['frequency'])
-    history_range = dict_cmd['history']
-    gain = float(dict_cmd['gain'])
     
+    
+cmd_target_watt = float(dict_cmd['target_watt'])
+cmd_algorithm = dict_cmd['algorithm']
+ldc_signal = float(dict_cmd['frequency'])
+history_range = dict_cmd['history']
+gain = float(dict_cmd['gain'])
+
+send_command(dict_cmd={"cmd": f"s {cmd_target_watt}"}, ip=tcp_ip, port=tcp_port, timeout=0.1)
+send_command(dict_cmd={"cmd": f"k {gain}"}, ip=tcp_ip, port=tcp_port, timeout=0.1)
+send_command(dict_cmd={"cmd": f"0 {ldc_signal}"}, ip=tcp_ip, port=tcp_port, timeout=0.1)
 
 df_data = get_data(day=datetime.datetime.now().strftime('%Y_%m_%d'))#.reset_index(drop=True)
 
@@ -497,16 +499,16 @@ tab_selected_style = {
 def drop_load(n_clicks_timestamp):
     global cmd_target_watt, cmd_algorithm, ldc_signal
     try:
-        if cmd_algorithm=='basic_ldc': ## emergency drop
-            if n_clicks_timestamp>(time.time()*1e3)-10:
-                ldc_signal = 750
-                cmd_target_watt = 1
-                send_command(dict_cmd={"cmd":"s {}".format(cmd_target_watt)}, ip=tcp_ip, port=tcp_port, timeout=0.1)
-                send_command(dict_cmd={"cmd":"k {}".format(10000)}, ip=tcp_ip, port=tcp_port, timeout=0.1)
-                send_command(dict_cmd={"cmd":"0 {}".format(ldc_signal)}, ip=tcp_ip, port=tcp_port, timeout=0.1)
-                return 0.001
-            else:
-                return cmd_target_watt
+        # if cmd_algorithm=='basic_ldc': ## emergency drop
+        if n_clicks_timestamp>(time.time()*1e3)-10:
+            ldc_signal = 750
+            cmd_target_watt = 1
+            send_command(dict_cmd={"cmd":"s {}".format(cmd_target_watt)}, ip=tcp_ip, port=tcp_port, timeout=0.1)
+            send_command(dict_cmd={"cmd":"k {}".format(10000)}, ip=tcp_ip, port=tcp_port, timeout=0.1)
+            send_command(dict_cmd={"cmd":"0 {}".format(ldc_signal)}, ip=tcp_ip, port=tcp_port, timeout=0.1)
+            return 0.001
+        else:
+            return cmd_target_watt
     except Exception as e:
         print(f"Error grid_server.drop_load:{e}")
 
@@ -525,10 +527,12 @@ def update_settings(n_submit, algorithm, set_target, target_watt):
     global refresh_rate, gain, dict_cmd, dict_agg, cmd_algorithm, cmd_target_watt, ldc_signal, latest_demand
     try:
         cmd_algorithm = algorithm
+        send_command(dict_cmd={"algorithm":cmd_algorithm}, ip=tcp_ip, port=tcp_port)
+
         if cmd_algorithm=='no_ldc':
             ldc_signal = 850
-            send_command(dict_cmd={"cmd":"o {}".format(ldc_signal), "algorithm":cmd_algorithm}, ip=tcp_ip, port=tcp_port)
-            send_command(dict_cmd={"cmd":"s {}".format(30000), "algorithm":cmd_algorithm, "set_target":30000}, ip=tcp_ip, port=tcp_port)
+            send_command(dict_cmd={"cmd":f"o {ldc_signal}"}, ip=tcp_ip, port=tcp_port)
+            send_command(dict_cmd={"cmd":f"s {30000}", "set_target":30000}, ip=tcp_ip, port=tcp_port)
 
         elif cmd_algorithm=='ripple_control':
             now = datetime.datetime.now()
@@ -546,7 +550,7 @@ def update_settings(n_submit, algorithm, set_target, target_watt):
                 signal = 0.0
             
             ldc_signal = signal + 750
-            send_command(dict_cmd={"cmd":"o {}".format(ldc_signal), "algorithm":cmd_algorithm}, ip=tcp_ip, port=tcp_port)
+            send_command(dict_cmd={"cmd":f"o {ldc_signal}"}, ip=tcp_ip, port=tcp_port)
 
         elif cmd_algorithm in ['basic_ldc', 'advanced_ldc']:
             print(n_submit, algorithm, set_target, target_watt)
@@ -554,8 +558,8 @@ def update_settings(n_submit, algorithm, set_target, target_watt):
                 pass
             else:
                 cmd_target_watt = target_watt * 1000
-                send_command(dict_cmd={"cmd":"s {}".format(cmd_target_watt), "algorithm":cmd_algorithm, "set_target":set_target}, ip=tcp_ip, port=tcp_port)
-                send_command(dict_cmd={"cmd":"k {}".format(gain)}, ip=tcp_ip, port=tcp_port)
+                send_command(dict_cmd={"cmd":f"s {cmd_target_watt}", "set_target":set_target}, ip=tcp_ip, port=tcp_port)
+                send_command(dict_cmd={"cmd":f"k {gain}"}, ip=tcp_ip, port=tcp_port)
 
         dict_cmd.update({"target_watt":str(cmd_target_watt), "set_target":set_target, "frequency":str(ldc_signal), "algorithm":cmd_algorithm})
         save_json(dict_cmd, 'dict_cmd.txt')
@@ -642,7 +646,7 @@ def update_signal(n_submit, frequency):
 def update_display_target(n_intervals):
     # change the frequency signal 
     global date_list, refresh_rate, gain, dict_cmd, dict_agg, cmd_algorithm, cmd_target_watt, ldc_signal, latest_demand
-    d = send_command(dict_cmd={'states':'target_watt'}, report=True, timeout=0.1)
+    d = send_command(dict_cmd={'states':'target_watt'}, report=True)
     if d:
         cmd_target_watt = d["target_watt"]
     return f' {np.round(cmd_target_watt*1e-3, 2)} kW'
@@ -656,7 +660,7 @@ def update_display_signal(n_intervals):
     # change the frequency signal 
     global refresh_rate, gain, dict_cmd, dict_agg, cmd_algorithm, cmd_target_watt, ldc_signal, latest_demand
     
-    d = send_command(dict_cmd={'states':'signal'}, report=True, timeout=0.1)
+    d = send_command(dict_cmd={'states':'signal'}, report=True)
     
     if d:
         ldc_signal = d['signal']
@@ -671,7 +675,7 @@ def update_display_signal(n_intervals):
 def update_display_gain(n_intervals):
     # change the frequency signal 
     global refresh_rate, gain, dict_cmd, dict_agg, cmd_algorithm, cmd_target_watt, ldc_signal, latest_demand
-    d = send_command(dict_cmd={'states':'gain'}, report=True, timeout=0.1)
+    d = send_command(dict_cmd={'states':'gain'}, report=True)
     if d: 
         gain = d['gain']
     return f' {np.round(gain, 2)}'
@@ -713,7 +717,7 @@ def update_history_range(value):
     history_range = value
 
 
-    if history_range in ['Last 15 Minutes', 'Last 30 Minutes', 'Last 1 Hour', 'Last 2 Hours', 'Last 6 Hours', 'Last 12 Hours', 'Last 24 Hours']:
+    if history_range in ['Last 15 Minutes', 'Last 30 Minutes', 'Last 1 Hour', 'Last 2 Hours']:
         refresh_rate = 3*1000  #[ms]
     else:
         refresh_rate = 60*1000 
@@ -749,8 +753,13 @@ def update_data(n_intervals, history_range, json_data, graph_data):
                 n_points = int(history_range.split()[1]) * 60 # number of seconds
             else:
                 n_points = int(history_range.split()[1]) * 60 * 60 # number of seconds
+            
             unixend = int(time.time())
             unixstart =  int(unixend - n_points)
+            
+            # if json_data:
+            #     df_data = pd.read_json(json_data, orient='split').astype(float)
+            #     print(df_data)
         else:
             day = history_range
             n_points = 60 * 60 * 24  # number of seconds
@@ -760,10 +769,11 @@ def update_data(n_intervals, history_range, json_data, graph_data):
             unixend = dt_end.timestamp()
 
 
-        # if json_data:
-        #     df_data = pd.read_json(json_data, orient='split').astype(float)
-        # else:
+        
         df_data = get_data(unixstart=unixstart, unixend=unixend)
+        
+        # if new_data.size:
+        #     df_data = pd.concat([df_data, new_data.reset_index()], axis=0, sort='unixtime').reset_index(drop=True)
         
         # ### get upperbound data
         # if unixend > df_data['unixtime'].max():
@@ -1062,14 +1072,14 @@ def serve_layout():
                     selected_style=tab_selected_style,
                     className='custom-tab',
                     ),
-                    # dcc.Tab(
-                    #  label="History", 
-                    #  value="history_tab",
-                    #  style=tab_style,
-                    #  selected_style=tab_selected_style,
-                    #  className='custom-tab',
-                    #  ),
-              
+                dcc.Tab(
+                    label="History", 
+                    value="history_tab",
+                    style=tab_style,
+                    selected_style=tab_selected_style,
+                    className='custom-tab',
+                    ),
+            
             ],
             value="status_tab",
             className="col s12 m3 l2",
@@ -1094,62 +1104,29 @@ def serve_layout():
 
 
 
-def render_status():
+def render_status(history=True):
     # render content for status tab
     global date_list, refresh_rate, gain, dict_cmd, dict_agg, cmd_algorithm, cmd_target_watt, ldc_signal, latest_demand
 
     date_list = []
-    hist_files = glob.glob("/home/pi/studies/ardmore/data/T1_*.pkl.xz")
-    list_files = [x.split('/')[-1] for x in hist_files]
-    dates = ['-'.join(x.split('.')[0].split('_')[1:]) for x in list_files]
-    dates.sort()
-    date_list.extend(dates)
-    date_list.extend([
-        # 'Last 2 Hours', 
-        # 'Last 1 Hour', 
-        # 'Last 30 Minutes',
-        # 'Last 15 Minutes',
-        ])
+    if history:
+        hist_files = glob.glob("/home/pi/studies/ardmore/data/T1_*.pkl.xz")
+        list_files = [x.split('/')[-1] for x in hist_files]
+        dates = ['-'.join(x.split('.')[0].split('_')[1:]) for x in list_files]
+        dates.sort()
+        date_list.extend(dates)
+        
+    else:
+        date_list.extend([
+            'Last 2 Hours', 
+            'Last 1 Hour', 
+            'Last 30 Minutes',
+            'Last 15 Minutes',
+            ])
+        
     date_list.reverse()
 
-    return html.Div(children=[
-        html.Div([
-            html.H1("Microgrid Status", 
-                style={
-                    'marginTop':'5', 
-                    'text-align':'center',
-                    'float':'center', 
-                    'color':'white'
-                    }
-                ),
-            ], 
-            className='banner', 
-            style={
-                'width':'100%', 
-                'display':'inline-block',
-                "backgroundColor": "#18252E",
-                }
-        ),
-
-        html.Div([
-            html.Div([
-                html.Label('Plot Range:', 
-                    className='column', 
-                    style={
-                        'color':'white', 
-                        'text-align':'left', 
-                        'display':'inline-block', 
-                        "position": "relative"
-                        }
-                    ),
-                dcc.Dropdown(
-                    id='dropdown-history',
-                    options=[{'label': x, 'value': x} for x in date_list],
-                    value=dict_cmd['history'],
-                    ),
-                ],className='column', 
-            ),
-            html.Div('  ',
+    empty = html.Div('  ',
                 className='column',
                 style={
                     'color':'white', 
@@ -1157,274 +1134,336 @@ def render_status():
                     'display':'inline-block', 
                     "position": "relative"
                     }
-            ),
-            html.Div([
-                html.Label('Target:', 
-                    className='column', 
-                    style={
-                        'color':'white', 
-                        'text-align':'left', 
-                        'display':'inline-block', 
-                        'position': 'relative'
-                        }
-                    ),
-                html.Div(id='display-target-kw', 
-                    children=f'{np.round(float(cmd_target_watt)*1e-3, 3)} kW', 
-                    className='column', 
-                    style={
-                        'font-size':'x-large', 
-                        'color':'white', 
-                        'text-align':'left', 
-                        'display':'inline-block', 
-                        'position': 'relative'
-                        }
-                    ),
-                dcc.Interval(id='periodic-target-update', 
-                        interval=10*1000, 
-                        n_intervals=0
-                    ),
-                ], className='column', 
-            ),
-            html.Div([
-                html.Label('Signal:', 
-                    className='column',
-                    style={
-                        'color':'white', 
-                        'text-align':'left', 
-                        'display':'inline-block', 
-                        'position': 'relative'
-                        }
-                    ),
-                html.Div(id='display-signal-hz', 
-                    children=f'{np.round(ldc_signal, 1)} Hz', 
-                    className='column',
-                    style={
-                        'font-size':'x-large', 
-                        'color':'white', 
-                        'text-align':'left', 
-                        'display':'inline-block', 
-                        'position': 'relative'
-                        }
-                    ),
-                ], className='column',
-            ),
-            html.Div([
-                html.Label('Gain:', 
-                    className='column',
-                    style={
-                        'color':'white', 
-                        'text-align':'left', 
-                        'display':'inline-block', 
-                        "position": "relative"
-                        }
-                    ),
-                html.Div(id='display-gain', 
-                    children=f'{np.round(gain, 1)}', 
-                    className='column',
-                    style={
-                        'font-size':'x-large', 
-                        'color':'white', 
-                        'text-align':'left', 
-                        'display':'inline-block', 
-                        "position": "relative"
-                        }
-                    ),
-                ], className='column',
-            ),
-            html.Div('  ',
-                className='column',
-                style={
-                    'color':'white', 
-                    'marginTop': '20', 
-                    'display':'inline-block', 
-                    "position": "relative"}
-            ),
-            html.Div([
-                html.Label('Algorithm:', 
-                    className='column',
-                    style={
-                        'color':'white', 
-                        'display':'inline-block', 
-                        "position": "relative"
-                        }
-                    ),
-                dcc.RadioItems(
-                    id='cmd-algorithm',
-                    options=[
-                        {"label": "No LDC", "value": 'no_ldc'},
-                        {"label": "Basic", "value": 'basic_ldc'},
-                        {"label": "Advanced", "value": 'advanced_ldc'},
-                        # {"label": "Smart", "value": 'smart_ldc'},
-                        {"label": "Ripple Control", "value": 'ripple_control'},
-                    ],
-                    value=cmd_algorithm,
-                    className='column',
-                    style={
-                        'color':'white', 
-                        'margin': '3', 
-                        "position": "relative", 
-                        'display': 'block'}
-                    ),  
-                ], 
-                className='column',
-                style={
-                    'display':'inline-block', 
-                    "position": "relative",
-                    }
-            ),
-            html.Div([
-                html.Label('Set Target:', 
-                    className='column',
-                    style={
-                        'color':'white', 
-                        'display':'inline-block', 
-                        "position": "relative"
-                        }
-                    ),
-                dcc.RadioItems(
-                    id='cmd-set-target',
-                    options=[
-                        {"label": "Auto (avg_1h)", "value": 'auto'},
-                        {"label": "Manual (kW)", "value": 'manual'},
-                    ],
-                value=dict_cmd["set_target"],
-                className='column',
-                style={
-                    'color':'white', 
-                    'margin': '3', 
-                    "position": "relative",
-                    }
-                ),
-                dcc.Input(id='input-target-kw', 
-                    # value= np.round(float(cmd_target_watt)/1000, 3), # converted to kW
-                    disabled=False, 
-                    type='number', 
-                    min=0, 
-                    # max= 30, # converted to kW
-                    step=0.10, 
-                    debounce=True,
-                    className='column',
-                    style={
-                        'font-size': 'large', 
-                        'text-align': 'center', 
-                        'display':'inline-block', 
-                        'width':'90%', 
-                        'padding':'3', 
-                        "position": "relative"
-                        }
-                    ),
-                ], 
-                className='column',
-                style={'display':'inline-block', "position": "relative",}
-                ),
+            )
 
-            html.Div([
-                html.Label('Set signal (Hz):', 
-                    className='column',
+    banner = html.Div([
+                html.H1("Microgrid Status", 
                     style={
-                        'text-align':'left', 
-                        'color':'white', 
-                        'display':'inline-block', 
-                        'margin':'0', 
-                        "float": "left"
-                        }
-                    ),
-                dcc.Input(id='input-cmd-freq', 
-                    # value=ldc_signal,
-                    disabled=False, 
-                    type='number', 
-                    min=0, 
-                    max= 5000, 
-                    step=1, 
-                    debounce=True,
-                    className='column',
-                    style={
-                        'font-size':'large', 
-                        'text-align':'center', 
-                        'display':'inline-block', 
-                        'width':'90%', 
-                        'padding':'0', 
-                        "position": "relative"
+                        'marginTop':'5', 
+                        'text-align':'center',
+                        'float':'center', 
+                        'color':'white'
                         }
                     ),
                 ], 
-                className='column', 
+                className='banner', 
                 style={
-                    'text-align': 'left', 
-                    'display': 'inline-block', 
-                    'padding': '0', 
-                    "float": "left"
-                    },
-            ),
-            html.Div([
-                html.Label('Set gain:', 
-                    className='column',
-                    style={
-                        'text-align': 'left', 
-                        'color': 'white', 
-                        'display': 'inline-block', 
-                        'margin': '0', 
-                        "float": "left"
-                        }
-                    ),
-                dcc.Input(id='input-cmd-gain', 
-                    # value=gain,
-                    disabled=False, 
-                    type='number', 
-                    min=0, 
-                    max= 5000, 
-                    step=1, 
-                    debounce=True,
-                    className='column',
-                    style={
-                        # 'font-size':'large', 
-                        'text-align':'center', 
-                        'display':'inline-block', 
-                        'width':'90%', 
-                        'padding':'0', 
-                        "position": "relative"
-                        }
-                    ),
-                ], 
-                className='column', 
-                style={
-                    'text-align':'left', 
-                    'display':'inline-block', 
-                    'padding':'0', 
-                    "float": "left"
-                    },
-            ),
-            html.Div([
-                html.Label('Emergency load shedding:', 
-                    className='column',
-                    style={
-                        'text-align':'left', 
-                        'color':'white', 
-                        'display':'inline-block', 
-                        'margin':'0', 
-                        "float": "left"
-                        }
-                    ),
-                html.Button('Shed!', 
-                    id='btn_cmd_drop', 
-                    n_clicks_timestamp=0, 
-                    className='column', 
-                    style={
-                        'text-align':'center', 
-                        'font-size':'large', 
-                        'width': '90%',
-                        'border-radius':'10px', 
-                        'hover':{
-                            'background-color':'rgb(255,255,255)', 
-                            'color': 'rgb(255,0,0)'
+                    'width':'100%', 
+                    'display':'inline-block',
+                    "backgroundColor": "#18252E",
+                    }
+            )
+
+    plot_range_block = html.Div([
+                            html.Label('Plot Range:', 
+                                className='column', 
+                                style={
+                                    'color':'white', 
+                                    'text-align':'left', 
+                                    'display':'inline-block', 
+                                    "position": "relative"
+                                    }
+                                ),
+                            dcc.Dropdown(
+                                id='dropdown-history',
+                                options=[{'label': x, 'value': x} for x in date_list],
+                                value=date_list[0],
+                                ),
+                            ],className='column', 
+                        )
+
+    target_display_block = html.Div([
+                        html.Label('Target:', 
+                            className='column', 
+                            style={
+                                'color':'white', 
+                                'text-align':'left', 
+                                'display':'inline-block', 
+                                'position': 'relative'
+                                }
+                            ),
+                        html.Div(id='display-target-kw', 
+                            children=f'{np.round(float(cmd_target_watt)*1e-3, 3)} kW', 
+                            className='column', 
+                            style={
+                                'font-size':'x-large', 
+                                'color':'white', 
+                                'text-align':'left', 
+                                'display':'inline-block', 
+                                'position': 'relative'
+                                }
+                            ),
+                        dcc.Interval(id='periodic-target-update', 
+                                interval=10*1000, 
+                                n_intervals=0
+                            ),
+                        ], className='column', 
+                    )
+    
+    signal_display_block = html.Div([
+                        html.Label('Signal:', 
+                            className='column',
+                            style={
+                                'color':'white', 
+                                'text-align':'left', 
+                                'display':'inline-block', 
+                                'position': 'relative'
+                                }
+                            ),
+                        html.Div(id='display-signal-hz', 
+                            children=f'{np.round(ldc_signal, 1)} Hz', 
+                            className='column',
+                            style={
+                                'font-size':'x-large', 
+                                'color':'white', 
+                                'text-align':'left', 
+                                'display':'inline-block', 
+                                'position': 'relative'
+                                }
+                            ),
+                        ], className='column',
+                    )
+                    
+    gain_display_block = html.Div([
+                    html.Label('Gain:', 
+                        className='column',
+                        style={
+                            'color':'white', 
+                            'text-align':'left', 
+                            'display':'inline-block', 
+                            "position": "relative"
                             }
-                        }
-                    ),
-                ],
-                className='column', 
-            ),
+                        ),
+                    html.Div(id='display-gain', 
+                        children=f'{np.round(gain, 1)}', 
+                        className='column',
+                        style={
+                            'font-size':'x-large', 
+                            'color':'white', 
+                            'text-align':'left', 
+                            'display':'inline-block', 
+                            "position": "relative"
+                            }
+                        ),
+                    ], className='column',
+                )
+    
+    algorithm_set_block = html.Div([
+                        html.Label('Algorithm:', 
+                            className='column',
+                            style={
+                                'color':'white', 
+                                'display':'inline-block', 
+                                "position": "relative"
+                                }
+                            ),
+                        dcc.RadioItems(
+                            id='cmd-algorithm',
+                            options=[
+                                {"label": "No LDC", "value": 'no_ldc'},
+                                {"label": "Basic", "value": 'basic_ldc'},
+                                {"label": "Advanced", "value": 'advanced_ldc'},
+                                # {"label": "Smart", "value": 'smart_ldc'},
+                                {"label": "Ripple Control", "value": 'ripple_control'},
+                            ],
+                            value=cmd_algorithm,
+                            className='column',
+                            style={
+                                'color':'white', 
+                                'margin': '3', 
+                                "position": "relative", 
+                                'display': 'block'}
+                            ),  
+                        ], 
+                        className='column',
+                        style={
+                            'display':'inline-block', 
+                            "position": "relative",
+                            }
+                    )
 
+    target_set_block = html.Div([
+                            html.Label('Set Target:', 
+                                className='column',
+                                style={
+                                    'color':'white', 
+                                    'display':'inline-block', 
+                                    "position": "relative"
+                                    }
+                                ),
+                            dcc.RadioItems(
+                                id='cmd-set-target',
+                                options=[
+                                    {"label": "Auto", "value": 'auto'},
+                                    {"label": "Manual (kW)", "value": 'manual'},
+                                ],
+                            value=dict_cmd["set_target"],
+                            className='column',
+                            style={
+                                'color':'white', 
+                                'margin': '3', 
+                                "position": "relative",
+                                }
+                            ),
+                            dcc.Input(id='input-target-kw', 
+                                # value= np.round(float(cmd_target_watt)/1000, 3), # converted to kW
+                                disabled=False, 
+                                type='number', 
+                                min=0, 
+                                # max= 30, # converted to kW
+                                step=0.10, 
+                                debounce=True,
+                                className='column',
+                                style={
+                                    'font-size': 'large', 
+                                    'text-align': 'center', 
+                                    'display':'inline-block', 
+                                    'width':'90%', 
+                                    'padding':'3', 
+                                    "position": "relative"
+                                    }
+                                ),
+                            ], 
+                            className='column',
+                            style={'display':'inline-block', "position": "relative",}
+                        )
+    
+    signal_set_block = html.Div([
+                            html.Label('Set signal (Hz):', 
+                                className='column',
+                                style={
+                                    'text-align':'left', 
+                                    'color':'white', 
+                                    'display':'inline-block', 
+                                    'margin':'0', 
+                                    "float": "left"
+                                    }
+                                ),
+                            dcc.Input(id='input-cmd-freq', 
+                                # value=ldc_signal,
+                                disabled=False, 
+                                type='number', 
+                                min=0, 
+                                max= 5000, 
+                                step=1, 
+                                debounce=True,
+                                className='column',
+                                style={
+                                    'font-size':'large', 
+                                    'text-align':'center', 
+                                    'display':'inline-block', 
+                                    'width':'90%', 
+                                    'padding':'0', 
+                                    "position": "relative"
+                                    }
+                                ),
+                            ], 
+                            className='column', 
+                            style={
+                                'text-align': 'left', 
+                                'display': 'inline-block', 
+                                'padding': '0', 
+                                "float": "left"
+                                },
+                        )
 
+    gain_set_block = html.Div([
+                        html.Label('Set gain:', 
+                            className='column',
+                            style={
+                                'text-align': 'left', 
+                                'color': 'white', 
+                                'display': 'inline-block', 
+                                'margin': '0', 
+                                "float": "left"
+                                }
+                            ),
+                        dcc.Input(id='input-cmd-gain', 
+                            # value=gain,
+                            disabled=False, 
+                            type='number', 
+                            min=0, 
+                            max= 5000, 
+                            step=1, 
+                            debounce=True,
+                            className='column',
+                            style={
+                                # 'font-size':'large', 
+                                'text-align':'center', 
+                                'display':'inline-block', 
+                                'width':'90%', 
+                                'padding':'0', 
+                                "position": "relative"
+                                }
+                            ),
+                        ], 
+                        className='column', 
+                        style={
+                            'text-align':'left', 
+                            'display':'inline-block', 
+                            'padding':'0', 
+                            "float": "left"
+                            },
+                    )
+
+    emergency_shed_block = html.Div([
+                                html.Label('Emergency load shedding:', 
+                                    className='column',
+                                    style={
+                                        'text-align':'left', 
+                                        'color':'white', 
+                                        'display':'inline-block', 
+                                        'margin':'0', 
+                                        "float": "left"
+                                        }
+                                    ),
+                                html.Button('Shed!', 
+                                    id='btn_cmd_drop', 
+                                    n_clicks_timestamp=0, 
+                                    className='column', 
+                                    style={
+                                        'text-align':'center', 
+                                        'font-size':'large', 
+                                        'width': '90%',
+                                        'border-radius':'10px', 
+                                        'hover':{
+                                            'background-color':'rgb(255,255,255)', 
+                                            'color': 'rgb(255,0,0)'
+                                            }
+                                        }
+                                    ),
+                                ],
+                                className='column', 
+                            )
+
+    if history:
+        settings_block = html.Div([
+            plot_range_block,
+            ],
+            className='column s12 m2 l2',
+            style = {
+                "position": "relative",
+                "float": "left",
+                # "border": "1px solid",
+                # "borderColor": "rgba(68,149,209,.9)",
+                "overflow": "hidden",
+                "marginBottom": "2px",
+                "width":"15%"
+            },
+        )
+    else:
+        settings_block = html.Div([
+            plot_range_block,
+            empty,
+            target_display_block,
+            signal_display_block,
+            gain_display_block,
+            empty,
+            algorithm_set_block,
+            target_set_block,
+            signal_set_block,
+            gain_set_block,
+            emergency_shed_block,
             ], 
             # className='row', 
             # style={'color':'white', 'display':'inline-block', 'margin':'3', 'width':'150px'},
@@ -1438,34 +1477,38 @@ def render_status():
                 "marginBottom": "2px",
                 "width":"15%"
             },
-        ),
-        
-        
-        
-        ### hidden divs
-        html.Div([
-            dcc.Interval(id='data-update', interval=refresh_rate, n_intervals=1),
-            html.Div(children=html.Div(id='data'), className='row', style={'opacity':'1.0'}),
-            html.Div(children=html.Div(id='settings'), className='row', style={'display':'none'}),
-            html.Div(children=html.Div(id='hidden-target'), style={'display': 'none'}),
-            html.Div(children=html.Div(id='hidden-gain'), style={'display': 'none'}),
-            html.Div(children=html.Div(id='hidden-freq'), style={'display': 'none'}),
-            html.Div(children=html.Div(id='hidden-freq2'), style={'display': 'none'}),
-            # html.Div(children=html.Div(id='dcc-holder'), style={'display': 'none'}),
-            ], 
-            style={'display':'none'},
-        ),
+        )
 
+    hidden_data_block = html.Div([
+                            dcc.Interval(id='data-update', interval=refresh_rate, n_intervals=1),
+                            html.Div(children=html.Div(id='data'), className='row', style={'opacity':'1.0'}),
+                            html.Div(children=html.Div(id='settings'), className='row', style={'display':'none'}),
+                            html.Div(children=html.Div(id='hidden-target'), style={'display': 'none'}),
+                            html.Div(children=html.Div(id='hidden-gain'), style={'display': 'none'}),
+                            html.Div(children=html.Div(id='hidden-freq'), style={'display': 'none'}),
+                            html.Div(children=html.Div(id='hidden-freq2'), style={'display': 'none'}),
+                            # html.Div(children=html.Div(id='dcc-holder'), style={'display': 'none'}),
+                            ], 
+                            style={'display':'none'},
+                        )
 
-        ### actual graph
-        html.Div([
+    graphs_block = html.Div([
             html.Div(id='graphs')], 
             className='col s12 m12 l7',
-            style={'width':'80%', 'display':'inline-block', 'padding':'3px'}),
-        ],
+            style={'width':'80%', 'display':'inline-block', 'padding':'3px'}
+        )
+
+    return html.Div(children=[
+                banner,
+                ### setttings
+                settings_block,
+                ### hidden divs
+                hidden_data_block,
+                ### actual graph
+                graphs_block,
+            ],
         className='row',
         style={'display':'inline-block', "backgroundColor": "#18252E", "width":"100%"} 
-
     )
 
 
@@ -1481,219 +1524,6 @@ n_blur_timestamp, The last time the component lost focus.
 
 
 
-def render_history():
-    # render content for status tab
-    global refresh_rate, gain, dict_cmd, dict_agg, cmd_algorithm, cmd_target_watt, previous_limit, ldc_signal, latest_demand, start_date
-    # date_list = pd.date_range(start=start_date, end=datetime.datetime.now(), normalize=True)
-    # date_list = [a.strftime('%Y_%m_%d') for a in date_list]
-    hist_files = glob.glob("/home/pi/studies/ardmore/data/T1_*.pkl.xz")
-    list_files = [x.split('/')[-1] for x in hist_files]
-    date_list = [x.split('.')[0] for x in list_files]
-    date_list.sort()
-    date_list.reverse()   
-    return html.Div(children=[
-        html.Div([
-            html.Div([
-                html.Label('Plot Range:', className='column',
-                    style={'color':'white', 'display':'inline-block', 'margin':'3', 'width':'150px'}),
-                dcc.Dropdown(
-                    id='dropdown-history',
-                    options=[{'label': x, 'value': x} for x in date_list],
-                    value=date_list[0]),
-                html.Div(id='output-history', 
-                    style={'color':'white', 'display':'none', 'margin':'3', 'width':'150px'})], 
-                className='row', 
-                style={'color':'white', 'display':'inline-block', 'margin':'3', 'width':'150px'}),
-
-            html.H1("Microgrid History", 
-                style={'marginTop':'5', 'text-align':'center','float':'center', 'color':'white'})], 
-            
-            className='banner', 
-            style={'width':'100%', 'display':'inline-block',"backgroundColor": "#18252E"}),
-
-        html.Div([
-            html.Div([
-                html.Label('Power Target:', 
-                    className='column',
-                    style={'color':'white', 'display':'inline-block', 'margin':'3'}),
-            
-                html.Div([
-                    html.Div(id='display-target-kw', 
-                        children=np.round(float(cmd_target_watt)/1000, 3), 
-                        className='row', 
-                        style={'font-size':'xx-large', 
-                            'color':'white', 
-                            'text-align':'right', 
-                            'display':'inline-block', 
-                            'padding':'9', 
-                            "position": "relative"}),
-                    html.Div(id='display-target-kw-unit', 
-                        children='kW', 
-                        className='row',
-                        style={'font-size':'xx-large', 
-                            'color':'white', 
-                            'text-align':'left', 
-                            'display':'inline-block', 
-                            'padding':'9',
-                            "position": "relative"})], 
-                    className='column', 
-                    style={'display':'inline-block'}),
-            dcc.Interval(id='periodic-target-update', interval=30*1000),
-            # html.Div([
-            #     html.Button('+100W', id='button-power-up', n_clicks_timestamp=0, className='row', style={'padding':'3px 3px', 'font-size':'small', 'width':'60px', 'hover':{'background-color':'#4CAF50', 'color': 'white'}}),
-            #     html.Button('-100W', id='button-power-down', n_clicks_timestamp=0, className='row', style={'padding':'3px 3px', 'font-size':'small', 'width':'60px', 'hover':{'background-color':'#4CAF50', 'color': 'white'}}),
-            #     ], className='column'),
-            ], 
-            className='column'),
-
-
-            html.Div([
-                html.Label('Set Target:', className='column',
-                    style={'text-align':'left', 'color':'white', 'display':'inline-block', 'margin':'0', "float": "left",}),
-                html.Div([
-                    dcc.Input(id='input-target-kw', 
-                        value= np.round(float(cmd_target_watt)/1000, 3), # converted to kW
-                        disabled=False, 
-                        type='number', 
-                        min=0, 
-                        max= 30, # converted to kW
-                        step=0.10, 
-                        className='row',
-                        style={'font-size':'large', 'text-align':'center', 'display':'inline-block', 'width':'100px', 'padding':'0', "position": "relative",}),
-
-                    html.Div(id='display-target-kw-unit', children='kW', className='row',
-                        style={'font-size':'large', 'color':'white', 'text-align':'left', 'display':'inline-block', 'padding':'3',"position": "relative",}),
-                    ], className='column'
-                ),
-              
-            ], 
-            className='column', style={'text-align':'left', 'display':'inline-block', 'padding':'0', "float": "left",},
-            ),
-
-            html.Div([
-                html.Label(' ', className='column',
-                    style={'color':'white', 'display':'inline-block', 'padding':'10'}),
-                ], 
-                className='column',
-            ),
-
-            html.Div([
-                html.Label('Signal:', className='column',
-                    style={'color':'white', 'display':'inline-block', 'margin':'3'}),
-                html.Div(id='input-cmd-freq', children=str(ldc_signal), className='row',
-                    style={'font-size':'large', 'color':'white', 'text-align':'right', 'display':'inline-block', 'padding':'9', "position": "relative",}),  
-                ], 
-                className='column', style={'display':'inline-block'},
-            ),
-
-
-
-            html.Div([
-                html.Label('Algorithm:', className='column',
-                    style={'color':'white', 'display':'inline-block', "position": "relative",}),
-                dcc.RadioItems(
-                    id='cmd-algorithm',
-                    options=[
-                        {"label": "No LDC", "value": 0},
-                        {"label": "With LDC", "value": 1},
-                        {"label": "Auto Target", "value": 2},
-                        # {"label": "Smart LDC", "value": 3},
-                        ],
-                    value=cmd_algorithm,
-                    className='column',
-                    style={'color':'white', 'margin':'3', "position": "relative",}
-                ),
-            
-                ], 
-                className='row',
-                style={'display':'inline-block', "position": "relative",}
-            ),
-
-            html.Div([
-                html.Label('Set gain:', className='column',
-                    style={'text-align':'left', 'color':'white', 'display':'inline-block', 'margin':'0', "float": "left",}),
-                html.Div([
-                    dcc.Input(id='input-cmd-gain', 
-                        # value=gain,
-                        disabled=False, 
-                        type='number', 
-                        min=0, 
-                        max= 5000, 
-                        step=1, 
-                        className='row',
-                        style={'font-size':'large', 'text-align':'center', 'display':'inline-block', 'width':'100px', 'padding':'0', "position": "relative",}),               
-                    ], 
-                    className='column'
-                ),
-              
-                ], 
-                className='column', style={'text-align':'left', 'display':'inline-block', 'padding':'0', "float": "left",},
-            ),
-
-            html.Div([
-                html.Label('Set signal:', className='column',
-                    style={'text-align':'left', 'color':'white', 'display':'inline-block', 'margin':'0', "float": "left",}),
-                html.Div([
-                    dcc.Input(id='input-cmd-freq', 
-                        # value=ldc_signal,
-                        disabled=False, 
-                        type='number', 
-                        min=0, 
-                        max= 5000, 
-                        step=1, 
-                        className='row',
-                        style={'font-size':'large', 'text-align':'center', 'display':'inline-block', 'width':'100px', 'padding':'0', "position": "relative",}),
-                    ], 
-                    className='column'
-                ),
-                ], 
-                className='column', style={'text-align':'left', 'display':'inline-block', 'padding':'0', "float": "left",},
-            ),
-
-            html.Div([
-                # html.Label('Emergency load shedding:', className='column',
-                #         style={'text-align':'left', 'color':'white', 'display':'inline-block', 'margin':'0', "float": "left",}),
-                  
-                html.Div([
-                    html.Button('Drop!', id='btn_cmd_drop', n_clicks_timestamp=0, className='row', style={'text-align':'center', 'font-size':'large', 'border-radius':'30px'}), #, 'hover':{'background-color':'rgb(255,255,255)', 'color': 'rgb(255,0,0)'}}),
-                    #       html.Button('-100W', id='button-power-down', n_clicks_timestamp=0, className='row', style={'padding':'3px 3px', 'font-size':'small', 'width':'60px', 'hover':{'background-color':'#4CAF50', 'color': 'white'}}),
-                    ], 
-                    className='column'
-                ),
-                ], 
-                className='column', 
-            ), 
-            ], 
-            className='row s12 m2 l2',
-            style = {"display":"none"},
-        ),
-
-        ### hidden divs
-        html.Div([
-            dcc.Interval(id='data-update', interval=refresh_rate),
-            html.Div(children=html.Div(id='data'), className='row', style={'opacity':'1.0'}),
-            # html.Div(children=html.Div(id='command'), style={'display': 'none'}),
-            html.Div(children=html.Div(id='hidden-gain'), style={'display': 'none'}),
-            html.Div(children=html.Div(id='hidden-freq'), style={'display': 'none'}),
-            html.Div(children=html.Div(id='hidden-freq2'), style={'display': 'none'}),
-
-            ], 
-            className='col s12 m12 l7',
-            style={'width':'80%', 'display':'inline-block', 'padding':'3px', 'display':'none'},
-        ),
-        ### actual graph
-        html.Div([
-            html.Div(children=html.Div(id='graphs'), className='row'),
-            ],
-            className='col s12 m12 l7',
-            style={'width':'100%', 'display':'inline-block', 'padding':'3px'},
-        ),
-        ],
-        className='row',
-        style={'display':'inline-block', "backgroundColor": "#18252E", "width":"100%"} 
-    )
-
-
 app.layout = serve_layout()
 
 @app.callback(
@@ -1701,11 +1531,11 @@ app.layout = serve_layout()
     [Input(component_id="tabs", component_property="value")])
 def render_content(tab):
     if tab == "status_tab":
-        return render_status()
+        return render_status(history=False)
     elif tab == "history_tab":
-        return render_history()
+        return render_status(history=True)
     else:
-        return render_status()
+        return render_status(history=False)
 
 
 

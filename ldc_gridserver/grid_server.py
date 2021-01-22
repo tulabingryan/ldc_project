@@ -677,7 +677,7 @@ def update_display_gain(n_intervals):
     global refresh_rate, gain, dict_cmd, dict_agg, cmd_algorithm, cmd_target_watt, ldc_signal, latest_demand
     d = send_command(dict_cmd={'states':'gain'}, report=True)
     if d: 
-        gain = d['gain']
+        return f" {d['gain']}"
     return f' {np.round(gain, 2)}'
 
 
@@ -950,7 +950,7 @@ def update_graph(history_range, json_data):
                 animate=False,
                 figure={'data': traces_phase_power,
                     'layout' : go.Layout(xaxis= dict(autorange=True),
-                              yaxis=dict(autorange=True, title='Power (kW)'),
+                              yaxis=dict(autorange=True, title='Power (W)'),
                               margin={'l':50,'r':50,'t':50,'b':50},
                               title='Power Demand Per Phase',
                               # legend=dict(font=dict(size=10), orientation='h', x=0.85, y=1.15),
@@ -1007,8 +1007,8 @@ def update_graph(history_range, json_data):
                 y = df_data["signal"].values, 
                 name = 'signal',
                 line= {'color':'rgb(0,255,255)'},
-                # opacity = 0.8,
-                # fill = "tozeroy",
+                opacity = 0.8,
+                fill = "tozeroy",
                 )
 
             graphs.append(html.Div(dcc.Graph(
@@ -1016,7 +1016,7 @@ def update_graph(history_range, json_data):
                 animate=False,
                 figure={'data': [trace_signal],
                     'layout' : go.Layout(xaxis= dict(autorange=True),
-                              yaxis=dict(autorange=True, title='Frequency(Hz)'),
+                              yaxis=dict(range=[750, 900], title='Frequency(Hz)'),
                               margin={'l':50,'r':50,'t':50,'b':50},
                               title='LDC Signal',
                               # legend=dict(font=dict(size=10), orientation='v', x=0.85, y=1.15),
@@ -1066,7 +1066,7 @@ def serve_layout():
         html.Div([
             dcc.Tabs( id="tabs", children=[
                 dcc.Tab(
-                    label="Status", 
+                    label="Realtime", 
                     value="status_tab", 
                     style=tab_style,
                     selected_style=tab_selected_style,

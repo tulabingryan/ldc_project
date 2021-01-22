@@ -138,8 +138,8 @@ class SolarMonitor(multiprocessing.Process):
             try:
                 on_disk = pd.read_pickle(path, compression='infer')
                 df_all = pd.concat([on_disk, df_all], axis=0, sort=False)
-                df_all['timestamp'] = df_all['timestamp'].astype(int)
-                df_all = df_all.groupby('timestamp').mean()
+                df_all['unixtime'] = df_all['unixtime'].astype(int)
+                df_all = df_all.groupby('unixtime').mean()
                 df_all.reset_index(drop=False, inplace=True)
                 df_all.to_pickle(path, compression='infer')
             except Exception as e:
@@ -205,7 +205,7 @@ class SolarMonitor(multiprocessing.Process):
 
                 if save:
                     ### prepare history for saving
-                    dict_tosave.update({'timestamp': time.time()})
+                    dict_tosave.update({'unixtime': time.time()})
                     dict_history.update({time.time(): dict_tosave})
 
                     if now.second%60<1:

@@ -145,13 +145,20 @@ def get_data(day=None, unixstart=None, unixend=None, diagnostics=False):
             pass
         except KeyboardInterrupt:
             break
-                
-    float_cols = [x for x in df_data.columns if  not x.startswith('timezone')]
-    df_data = df_data[float_cols].astype(float)
-    df_data.index = pd.to_datetime(df_data['unixtime'].values, unit='s').tz_localize('UTC').tz_convert('Pacific/Auckland')
-    df_data = df_data.resample(f'1S').mean().interpolate()
-    return df_data
     
+    try:
+        float_cols = [x for x in df_data.columns if  not x.startswith('timezone')]
+        df_data = df_data[float_cols].astype(float)
+        if 'timestamp' in df_data.columns:
+            df_data.rename(columns={'timestamp':'unixtime'}, inplace=True)
+        df_data.dropna(inplace=True, subset=['unixtime'])
+        df_data.index = pd.to_datetime(df_data['unixtime'].values, unit='s').tz_localize('UTC').tz_convert('Pacific/Auckland')
+        df_data = df_data.resample(f'1S').mean().interpolate()
+        return df_data
+    except Exception as e:
+        print(f"Error get_data:{e}")
+        print(df_data)
+        return None
 
 
 
@@ -183,8 +190,8 @@ def update_history_option(n_intervals):
     [])
 def update_refresh_rate(history_range):
     # set history to put to graph
-    if history_range in ['Last 15 Minutes', 'Last 30 Minutes', 'Last 1 Hour', 'Last 2 Hours', 'Last 6 Hours', 'Last 12 Hours', 'Last 24 Hours']:
-        refresh_rate = 10*1000  #[ms]
+    if history_range in ['Last 15 Minutes', 'Last 30 Minutes', 'Last 1 Hour', 'Last 2 Hours']:
+        refresh_rate = 3*1000  #[ms]
     else:
         refresh_rate = 600*1000 
     print("Range: {}   Refresh: {}".format(history_range, refresh_rate))
@@ -240,6 +247,7 @@ def update_data(n_intervals, history_range, json_data):
     df_data = get_data(unixstart=unixstart, unixend=unixend)
     
     if not df_data.empty:
+        df_data = df_data[(df_data['unixtime']>=unixstart)&(df_data['unixtime']<=unixend)] 
         df_data = df_data.groupby('unixtime').mean()
         df_data.reset_index(drop=False, inplace=True)
         # df_data = df_data[(df_data['unixtime']>=unixstart) & (df_data['unixtime']<=unixend)]
@@ -278,9 +286,12 @@ def update_data(n_intervals, history_range, json_data):
 
 @app.callback(
     Output('graphs','children'),
-    [Input('hidden-data', 'data')],
+    [
+        Input(component_id='dropdown-history', component_property='value'),
+        Input(component_id='hidden-data', component_property='data'),
+        ],
     [])
-def update_graph(json_data):  
+def update_graph(history_range, json_data):  
     global device_names
     t = time.perf_counter()
     graphs = []
@@ -290,10 +301,28 @@ def update_graph(json_data):
     traces_temp_in = []
     traces_humidity = []
 
+    if history_range in ['Last 15 Minutes', 'Last 30 Minutes', 'Last 1 Hour', 'Last 2 Hours', 'Last 6 Hours', 'Last 12 Hours', 'Last 24 Hours']:
+        day = datetime.datetime.now().strftime('%Y_%m_%d')
+        if history_range.split()[2]=='Minutes':
+            n_points = int(history_range.split()[1]) * 60 # number of seconds
+        else:
+            n_points = int(history_range.split()[1]) * 60 * 60 # number of seconds
+        unixend = int(time.time())
+        unixstart =  int(unixend - n_points)
+    else:
+        day = history_range
+        n_points = 60 * 60 * 24  # number of seconds
+        dt_start = pd.to_datetime(history_range).tz_localize('Pacific/Auckland')
+        dt_end = dt_start + datetime.timedelta(days=1)
+        unixstart =  dt_start.timestamp()
+        unixend = dt_end.timestamp()
+
+
     if json_data:
         df_data = pd.read_json(json_data, orient='split')
 
         if not df_data.empty:
+            df_data = df_data[(df_data['unixtime']>=unixstart)&(df_data['unixtime']<=unixend)] 
             df_data = df_data.groupby('unixtime').mean().reset_index(drop=False)
             n_points = df_data['unixtime'].values[-1] - df_data['unixtime'].values[0]
             sample = max([1,int(n_points/5000)])
@@ -309,19 +338,41 @@ def update_graph(json_data):
             list_avgna = [x for x in df_data.columns if x not in list_zerona]
             df_data[list_zerona] = df_data[list_zerona].fillna(0)
             # df_data[list_avgna] = df_data[list_avgna].interpolate()
-                
+            
+
+            dict_params = {'power_kw': 'house'}
+            if 'solar_p_w' in df_data.columns:
+                df_data['solar_kw'] = df_data['solar_p_w'] / 1000
+                print(df_data['solar_kw'])
+                dict_params.update({'solar_kw':'solar'})
+
+            if 'house_p_w' in df_data.columns:
+                df_data['house_total'] = df_data['house_p_w'] /1000
+                df_data['power_kw'] = df_data[['house_total', 'power_kw']].mean(axis=1)
+            
+            # if 'grid_p_w' in df_data.columns:
+            #     df_data['grid_p_kw'] = df_data['grid_p_w'] / 1000
+            #     dict_params.update({'grid_p_kw': 'grid_import'})
+            
+
+            # if 'storage_p_w' in df_data.columns:
+            #     df_data['storage_p_kw'] = df_data['storage_p_w'] / 1000
+            #     dict_params.update({'storage_p_kw': 'storage'})
             
 
             ### plot total house demand
-            trace = go.Scattergl(
-                            x = df_data.index,
-                            y = df_data['power_kw'].values,
-                            name = 'power_kw',
-                            mode = 'lines',
-                            fill = "tozeroy",
-                            connectgaps=False,
-                            opacity=0.8,
-                            )
+            traces = []
+            for param, label in dict_params.items():
+                traces.append(go.Scattergl(
+                                x = df_data.index,
+                                y = df_data[param].values,
+                                name = label,
+                                mode = 'lines',
+                                fill = "tozeroy",
+                                connectgaps=False,
+                                opacity=0.8,
+                                )
+                )
 
             # trace_rolling_avg_60s = go.Scattergl(
             #                 x = df_data.index, 
@@ -336,7 +387,7 @@ def update_graph(json_data):
             graphs.append(html.Div(dcc.Graph(
                             id='total-house-demand',
                             animate=False,
-                            figure={'data': [trace],
+                            figure={'data': traces,
                                     'layout' : go.Layout(
                                         xaxis=dict(autorange=True),
                                         yaxis=dict(autorange=True, title='Power (kW)'),
@@ -387,7 +438,7 @@ def update_graph(json_data):
                                 figure={'data': traces_demand,
                                         'layout' : go.Layout(
                                             xaxis= dict(autorange=True),
-                                            yaxis=dict(autorange=True, title='Power (W)'),
+                                            yaxis=dict(autorange=True, title='Power (kW)'),
                                             margin={'l':50,'r':1,'t':45,'b':50},
                                             title='Devices Demand',
                                             # legend=dict(font=dict(size=10), orientation='h', x=0.85, y=1.15),
@@ -437,51 +488,51 @@ def update_graph(json_data):
                                                                             )}
                                     ), className='row'))
 
-            # plot status
-            list_params = [a for a in df_data.columns 
-                                if ((a.lower().endswith('status')) 
-                                    and not (a.lower().startswith('window')) 
-                                    and not (a.lower().startswith('door'))
-                                    )
-                            ]
+            ### plot status
+            # list_params = [a for a in df_data.columns 
+            #                     if ((a.lower().endswith('status')) 
+            #                         and not (a.lower().startswith('window')) 
+            #                         and not (a.lower().startswith('door'))
+            #                         )
+            #                 ]
 
-            i = 0
-            for param in list_params:
-                traces_status.extend([
-                    go.Scattergl(
-                            x = df_data.index,
-                            y = df_data[param].values + i,
-                            name = param.split('_')[0],
-                            mode = 'lines',
-                            # fill = "tozeroy",
-                            opacity=1.0,
-                            )
-                        ])
-                i = i + 2
+            # i = 0
+            # for param in list_params:
+            #     traces_status.extend([
+            #         go.Scattergl(
+            #                 x = df_data.index,
+            #                 y = df_data[param].values + i,
+            #                 name = param.split('_')[0],
+            #                 mode = 'lines',
+            #                 # fill = "tozeroy",
+            #                 opacity=1.0,
+            #                 )
+            #             ])
+            #     i = i + 2
 
-            graphs.append(html.Div(dcc.Graph(
-                            id='device-status',
-                            animate=False,
-                            figure={'data': traces_status,
-                                    'layout' : go.Layout(xaxis= dict(autorange=True),
-                                        yaxis=dict(autorange=True, title='Status (1=ON, 0=OFF)', 
-                                        tickvals=[x for x in range(20)], 
-                                        ticktext=['0' if x%2==0 else '1' for x in range(20)]),
-                                        margin={'l':50,'r':1,'t':45,'b':50},
-                                        title='Device Status',
-                                        # legend=dict(font=dict(size=10), orientation='h', x=0.85, y=1.15),
-                                        autosize=True,
-                                        # height=400,
-                                        font=dict(color='#CCCCCC'),
-                                        titlefont=dict(color='#CCCCCC', size=14),
-                                        hovermode="closest",
-                                        plot_bgcolor="#020202", #"#191A1A",
-                                        paper_bgcolor="#18252E",
-                                        uirevision='same',
-                                        )}
-                            ), className='row'))
+            # graphs.append(html.Div(dcc.Graph(
+            #                 id='device-status',
+            #                 animate=False,
+            #                 figure={'data': traces_status,
+            #                         'layout' : go.Layout(xaxis= dict(autorange=True),
+            #                             yaxis=dict(autorange=True, title='Status (1=ON, 0=OFF)', 
+            #                             tickvals=[x for x in range(20)], 
+            #                             ticktext=['0' if x%2==0 else '1' for x in range(20)]),
+            #                             margin={'l':50,'r':1,'t':45,'b':50},
+            #                             title='Device Status',
+            #                             # legend=dict(font=dict(size=10), orientation='h', x=0.85, y=1.15),
+            #                             autosize=True,
+            #                             # height=400,
+            #                             font=dict(color='#CCCCCC'),
+            #                             titlefont=dict(color='#CCCCCC', size=14),
+            #                             hovermode="closest",
+            #                             plot_bgcolor="#020202", #"#191A1A",
+            #                             paper_bgcolor="#18252E",
+            #                             uirevision='same',
+            #                             )}
+            #                 ), className='row'))
 
-            # plot device temp_in
+            ### plot device temp_in
             list_params = [a for a in df_data.columns if a.lower().endswith('temp_in')]
             list_params.extend([a for a in df_data.columns if a.lower().endswith('target_temp')])
             
@@ -519,43 +570,43 @@ def update_graph(json_data):
                         ), className='row'))
 
 
-            # plot device temp_target
-            list_params = [a for a in df_data.columns if a.lower().endswith('temp_target')]
-            # list_params.extend([a for a in df_data.columns if a.lower().endswith('target_temp')])
-            traces_temp_target = []
-            if 'heatpump_temp_out' in df_data.columns: 
-                df_data['ambient_temp'] = df_data['heatpump_temp_out']
-                list_params.extend(['ambient_temp'])
-            for param in list_params:
-                traces_temp_target.extend([
-                    go.Scattergl(
-                            x = df_data.index,
-                            y = df_data[param].values,
-                            name = param.split('_')[0],
-                            mode = 'lines',
-                            # fill = "tozeroy",
-                            # opacity=0.8,
-                            )
-                    ])
-            graphs.append(html.Div(dcc.Graph(
-                id='device-temp',
-                animate=False,
-                figure={'data': traces_temp_target,
-                        'layout' : go.Layout(xaxis= dict(autorange=True),
-                                    yaxis=dict(autorange=True, title='Temperature (C)'),
-                                    margin={'l':50,'r':1,'t':45,'b':50},
-                                    title='Device Target Temperature',
-                                    # legend=dict(font=dict(size=10), orientation='h', x=0.85, y=1.15),
-                                    autosize=True,
-                                    # height=400,
-                                    font=dict(color='#CCCCCC'),
-                                    titlefont=dict(color='#CCCCCC', size=14),
-                                    hovermode="closest",
-                                    plot_bgcolor="#020202", #"#191A1A",
-                                    paper_bgcolor="#18252E",
-                                    uirevision='same',
-                                )}
-                            ), className='row'))
+            # # plot device temp_target
+            # list_params = [a for a in df_data.columns if a.lower().endswith('temp_target')]
+            # # list_params.extend([a for a in df_data.columns if a.lower().endswith('target_temp')])
+            # traces_temp_target = []
+            # if 'heatpump_temp_out' in df_data.columns: 
+            #     df_data['ambient_temp'] = df_data['heatpump_temp_out']
+            #     list_params.extend(['ambient_temp'])
+            # for param in list_params:
+            #     traces_temp_target.extend([
+            #         go.Scattergl(
+            #                 x = df_data.index,
+            #                 y = df_data[param].values,
+            #                 name = param.split('_')[0],
+            #                 mode = 'lines',
+            #                 # fill = "tozeroy",
+            #                 # opacity=0.8,
+            #                 )
+            #         ])
+            # graphs.append(html.Div(dcc.Graph(
+            #     id='device-temp',
+            #     animate=False,
+            #     figure={'data': traces_temp_target,
+            #             'layout' : go.Layout(xaxis= dict(autorange=True),
+            #                         yaxis=dict(autorange=True, title='Temperature (C)'),
+            #                         margin={'l':50,'r':1,'t':45,'b':50},
+            #                         title='Device Target Temperature',
+            #                         # legend=dict(font=dict(size=10), orientation='h', x=0.85, y=1.15),
+            #                         autosize=True,
+            #                         # height=400,
+            #                         font=dict(color='#CCCCCC'),
+            #                         titlefont=dict(color='#CCCCCC', size=14),
+            #                         hovermode="closest",
+            #                         plot_bgcolor="#020202", #"#191A1A",
+            #                         paper_bgcolor="#18252E",
+            #                         uirevision='same',
+            #                     )}
+            #                 ), className='row'))
     # print(f"update_graph dt:{time.perf_counter()-t}")
     return graphs
 
@@ -704,7 +755,6 @@ def create_priorities_div(dict_items):
     [Input('hidden-data', 'data')],
     [])
 def create_states_div(json_data):
-    
     dict_all_devices = {
         'baseload':{'name':'Baseload', 'priority':0},
         'waterheater':{'name':'Waterheater', 'priority':80}, 
@@ -807,7 +857,8 @@ def create_states_div(json_data):
                         ])
     return list_div
 
-def render_status(house_num=1):
+
+def render_status(house_num=1, ):
     # render content for status tab
     global cmd_algorithm, cmd_loading, ldc_signal, date_list, dict_cmd, subnet
     subnet=house_num
@@ -818,10 +869,10 @@ def render_status(house_num=1):
     dates.sort()
     date_list.extend(dates)
     date_list.extend([
-        # 'Last 2 Hours', 
-        # 'Last 1 Hour', 
-        # 'Last 30 Minutes',
-        # 'Last 15 Minutes',
+        'Last 2 Hours', 
+        'Last 1 Hour', 
+        'Last 30 Minutes',
+        'Last 15 Minutes',
         ])
     date_list.reverse()
     dict_all_devices = {

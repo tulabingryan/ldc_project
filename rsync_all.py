@@ -70,6 +70,7 @@ def main():
   else:
     target_hosts.extend(['192.168.{}.{}'.format(x,y) for y in range(100, 114) for x in groups])
   
+  target_hosts.sort()
   
   while True:
     try:

@@ -35,6 +35,9 @@ if __name__=='__main__':
                     if oldfiles: 
                         try:
                             df_all = pd.read_pickle(oldfiles[-1])
+                            if 'timestamp' in df_all.columns:
+                                df_all.rename(columns={'timestamp':'unixtime'}, inplace=True)
+                            # print(df_all.head(3))
                         except Exception as e:
                             print(e)
                             pass
@@ -43,18 +46,23 @@ if __name__=='__main__':
                     
                     for nf in newfiles:
                         try:
-                            df_all = pd.concat([df_all, pd.read_pickle(nf)], axis=0)
+                            df_new = pd.read_pickle(nf)
+                            if 'timestamp' in df_new.columns:
+                                df_new.rename(columns={'timestamp':'unixtime'}, inplace=True)
+                            
+                            df_all = pd.concat([df_all, df_new], axis=0)
                         except:
                             print(nf)
                             pass
-
+                    
+                    
                     df_all.dropna(inplace=True, subset=['unixtime'])
                     df_all['unixtime'] = df_all['unixtime'].astype(int)
                     df_all = df_all.groupby('unixtime').mean()
                     df_all.reset_index(drop=False, inplace=True)
                     if df_all.size:
                         df_all.tail(3600*24).to_pickle(f'/home/pi/studies/ardmore/data/{n}_{today}.pkl.xz')
-                    # print(pd.read_pickle(f'/home/pi/studies/ardmore/data/{n}_{today}.pkl.xz'))
+                    # print(pd.read_pickle(f'/home/pi/studies/ardmore/data/{n}_{today}.pkl.xz').head(10))
                     [os.system(f'rm {x}') for x in newfiles]
                     # print(time.perf_counter()-t)
                 

@@ -14,6 +14,7 @@ if __name__=='__main__':
     while True:
         try:
             get_files()
+            time.sleep(0.5)
         except Exception as e:
             print(f"Error:{e}")
         except KeyboardInterrupt:

@@ -2098,7 +2098,7 @@ def ldc_dongle(states, common):
             elif common['algorithm']=='advanced_ldc':
                 # priority is based on the flexibility and random number from normal distribution of mean 0 and std 1.0
                 # flex_priority = normalize(states['flexibility'], a_min=1.0, a_max=99.0, x_max=1.0, x_min=-0.2)
-                states['priority'] = normalize(states['flexibility'], a_min=1.0, a_max=90.0, x_min=0.0, x_max=1.0)
+                states['priority'] = normalize(states['flexibility'], a_min=20.0, a_max=80.0, x_min=0.0, x_max=1.0)
                 # states['priority'] = compute_normalize(
                 #     states['flexibility'], 
                 #     np.zeros(states['flexibility'].size), 
@@ -2739,7 +2739,8 @@ def initialize_load(load_type, dict_devices, dict_house, idx, distribution, comm
         dict_out['unfinished'] = np.zeros(n_units) 
         dict_out['unixstart'] = np.random.normal(common['unixtime'] - (common['hour']*3600)- (3600*24) + (3600*18), 900, n_units)
         dict_out['unixend'] = np.random.normal(common['unixtime'] - (common['hour']*3600) - (3600*24) + (3600*21) , 900, n_units)
-      
+        dict_out['min_cycletime'] = np.random.uniform(1, 10, n_units)
+
     if load_type in ['solar', 'wind']:
         dict_out['mode'] = np.ones(n_units)  # generation modes are 1
         dict_out['priority'] = np.ones(n_units) * 90.0
@@ -2776,7 +2777,7 @@ def initialize_load(load_type, dict_devices, dict_house, idx, distribution, comm
             # dict_out['priority'] = np.arange(p_min, p_max, p_span/n_units )
             # dict_out['priority'] = np.random.uniform(p_min, p_max, n_units )
     else:
-        pass
+        dict_out['priority'] = np.random.uniform(25.0, 80.0, n_units )
 
     # if not has_numba:
     #     for k, v in dict_out.items():

@@ -20,7 +20,7 @@ class SolarMonitor(multiprocessing.Process):
         self.pv_address = {
             'H4': '192.168.1.72',
             'H5': '192.168.1.73',
-            'H1': '192.168.1.74',
+            'H1': '192.168.1.71',
         }
         
         self.house_id = house_id 

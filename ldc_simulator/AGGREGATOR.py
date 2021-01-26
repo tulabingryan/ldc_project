@@ -2198,7 +2198,7 @@ class Aggregator(multiprocessing.Process):
         from METER import EnergyMeter
         meters.append(EnergyMeter(house=f'H{self.house_num}', IDs=[0]))
         
-        if self.house_num in [4, 5]:
+        if self.house_num in [1, 4, 5]:
             from pvcom import SolarMonitor
             meters.append(SolarMonitor(house_id=f'H{self.house_num}'))
 

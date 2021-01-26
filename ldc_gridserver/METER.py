@@ -195,7 +195,7 @@ class EnergyMeter():
             while (not self.is_valid(response)) and (count<3):
                 self.ser.reset_input_buffer()
                 self.ser.reset_output_buffer()
-                self.ser.write(self.dict_modbus['{}_{}'.format(param, _id)])
+                self.ser.write(self.dict_modbus[f'{param}_{_id}'])
                 response = self.ser.read(7 + (2*(self.dict_registers[param][1]-1)))
                 count += 1
 

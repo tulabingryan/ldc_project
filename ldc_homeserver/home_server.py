@@ -151,9 +151,7 @@ def get_data(day=None, unixstart=None, unixend=None, diagnostics=False):
         df_data = df_data[float_cols].astype(float)
         if 'timestamp' in df_data.columns:
             df_data.rename(columns={'timestamp':'unixtime'}, inplace=True)
-        df_data.dropna(inplace=True, subset=['unixtime'])
-        df_data.index = pd.to_datetime(df_data['unixtime'].values, unit='s').tz_localize('UTC').tz_convert('Pacific/Auckland')
-        df_data = df_data.resample(f'1S').mean().interpolate()
+        
         return df_data
     except Exception as e:
         print(f"Error get_data:{e}")
@@ -247,10 +245,15 @@ def update_data(n_intervals, history_range, json_data):
     df_data = get_data(unixstart=unixstart, unixend=unixend)
     
     if not df_data.empty:
+        # df_data = df_data[(df_data['unixtime']>=unixstart)&(df_data['unixtime']<=unixend)] 
+        # df_data = df_data.groupby('unixtime').mean()
+        # df_data.reset_index(drop=False, inplace=True)
+        
+        df_data.dropna(inplace=True, subset=['unixtime'])
         df_data = df_data[(df_data['unixtime']>=unixstart)&(df_data['unixtime']<=unixend)] 
-        df_data = df_data.groupby('unixtime').mean()
-        df_data.reset_index(drop=False, inplace=True)
-        # df_data = df_data[(df_data['unixtime']>=unixstart) & (df_data['unixtime']<=unixend)]
+        df_data.index = pd.to_datetime(df_data['unixtime'].values, unit='s').tz_localize('UTC').tz_convert('Pacific/Auckland')
+        df_data = df_data.resample(f'1S').mean().interpolate(method='time')
+        
         
         ### check if meter data is valid
         if ('power_active_0' in df_data.columns):
@@ -340,35 +343,35 @@ def update_graph(history_range, json_data):
             # df_data[list_avgna] = df_data[list_avgna].interpolate()
             
 
-            dict_params = {'power_kw': 'house'}
+            dict_params = {'power_kw': {'label':'house', 'fill':'none'}}
             if 'solar_p_w' in df_data.columns:
                 df_data['solar_kw'] = df_data['solar_p_w'] / 1000
-                print(df_data['solar_kw'])
-                dict_params.update({'solar_kw':'solar'})
+                # print(df_data['solar_kw'])
+                dict_params.update({'solar_kw':{'label':'solar', 'fill':'none'}})
 
             if 'house_p_w' in df_data.columns:
                 df_data['house_total'] = df_data['house_p_w'] /1000
-                df_data['power_kw'] = df_data[['house_total', 'power_kw']].mean(axis=1)
+                df_data['power_kw'] = df_data[['house_total']].mean(axis=1)
             
-            # if 'grid_p_w' in df_data.columns:
-            #     df_data['grid_p_kw'] = df_data['grid_p_w'] / 1000
-            #     dict_params.update({'grid_p_kw': 'grid_import'})
+            if 'grid_p_w' in df_data.columns:
+                df_data['grid_p_kw'] = df_data['grid_p_w'] / 1000
+                dict_params.update({'grid_p_kw': {'label':'grid', 'fill':'none'}})
             
 
-            # if 'storage_p_w' in df_data.columns:
-            #     df_data['storage_p_kw'] = df_data['storage_p_w'] / 1000
-            #     dict_params.update({'storage_p_kw': 'storage'})
+            if 'storage_p_w' in df_data.columns:
+                df_data['storage_p_kw'] = df_data['storage_p_w'] / 1000
+                dict_params.update({'storage_p_kw': {'label':'battery', 'fill':'none'}})
             
 
             ### plot total house demand
             traces = []
-            for param, label in dict_params.items():
+            for param, value in dict_params.items():
                 traces.append(go.Scattergl(
                                 x = df_data.index,
                                 y = df_data[param].values,
-                                name = label,
+                                name = dict_params[param]['label'],
                                 mode = 'lines',
-                                fill = "tozeroy",
+                                fill = dict_params[param]['fill'],
                                 connectgaps=False,
                                 opacity=0.8,
                                 )
@@ -417,7 +420,7 @@ def update_graph(history_range, json_data):
             list_minus_hp = [a for a in df_data.columns if (a.lower().endswith('demand') and not (a.lower().startswith('heatpump')))]
             # df_data['heatpump_actual_demand'] = np.clip(((df_data['power_kw'] * 1000) - np.roll(df_data[list_minus_hp].sum(axis=1), shift=0))-200, a_min=0, a_max=1500)
             
-            print(list_params)
+            # print(list_params)
             if len(list_params):
                 traces_demand = [
                         go.Scattergl(
@@ -952,21 +955,21 @@ def render_status(house_num=1, ):
                     }
             ),
 
-            html.Div([
-                html.Label('Priorities', 
-                    className='column', 
-                    style={
-                        'color':'white', 
-                        'font-size':'large', 
-                        'text-align':'center', 
-                        'display':'inline-block', 
-                        "position": "relative"
-                        }
-                    ),
-                html.Div(children=priority_div, 
-                    className='column'
-                    ),
-                ]),
+            # html.Div([
+            #     html.Label('Priorities', 
+            #         className='column', 
+            #         style={
+            #             'color':'white', 
+            #             'font-size':'large', 
+            #             'text-align':'center', 
+            #             'display':'inline-block', 
+            #             "position": "relative"
+            #             }
+            #         ),
+            #     html.Div(children=priority_div, 
+            #         className='column'
+            #         ),
+            #     ]),
             
             html.Div([
                     html.Label('Device State', 

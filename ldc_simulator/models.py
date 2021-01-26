@@ -1454,6 +1454,22 @@ def compute_actual_demand_ntcl(proposed_demand, actual_status):
     return proposed_demand * actual_status
 
 
+# def compute_proposed_demand_ntcl(profile, len_profile, progress):
+#     '''
+#     Calculate the proposed demand of Non-TCLs
+
+#     Args:
+#         profile: device profile 
+#         len_profile: length of profile in seconds
+#         progress: current job progress 
+    
+#     Returns:
+#         proposed_demand: proposed demand 
+
+#     '''
+#     return 
+
+
 def compute_proposed_status_ntcl(progress, connected):
     '''
     Determine the status of the non-urgent non-TCL device.
@@ -1501,9 +1517,11 @@ def compute_flexibility_ntcl(unixstart, unixend, predicted_finish, len_profile):
     return (unixend-predicted_finish) / (unixend-(unixstart+len_profile))
 
 
+
+
 def device_ntcl(states, dict_data):
     ''' 
-    Generic model of Enduse of non-urgent non-thermostat controlled loads.
+    Generic model of non-urgent non-thermostat controlled loads.
     
     Args:
         states: dictionary containing the state of the device
@@ -1551,6 +1569,60 @@ def device_ntcl(states, dict_data):
         )).reshape(-1)
     
     return states
+
+
+### baseload ###############################
+def device_baseload(states, dict_data):
+    ''' 
+    Generic model of non-urgent non-thermostat controlled loads.
+    
+    Args:
+        states: dictionary containing the state of the device
+        dict_data: dictionary containing the representative profiles for the device
+
+    Returns:
+        updated dictionary
+    '''
+    ### calculate actual_demand based on approved status and proposed demand from previous step
+    states['actual_demand'] = np.asarray(compute_actual_demand_ntcl(
+        states['proposed_demand'], 
+        states['actual_status'], 
+        )).reshape(-1)
+
+    # ### update proposed_status and proposed_demand for next step
+    # states['proposed_status'] = np.asarray(compute_proposed_status_ntcl(
+    #     states['progress'], 
+    #     states['connected'],
+    #     )).reshape(-1)
+
+    ### mathematical model
+    # states['proposed_demand'] = compute_proposed_demand_ntcl(
+    #     states['charging_power'], 
+    #     states['soc'])
+
+    # states['proposed_demand'] = np.array([np.interp(x*y, np.arange(y), dict_data[k]) for k, x, y in zip(states['profile'], states['len_profile'], states['progress'])]).flatten()
+    states['proposed_demand'] = np.asarray([dict_data[k][int((x*y)%x)] for k, x, y in zip(
+        states['profile'], 
+        states['len_profile'], 
+        states['progress'])]).reshape(-1)
+
+    ### predict finish and calculate flexibility based on newly proposed demand
+    # states['predicted_finish'] = np.asarray(compute_finish_ntcl(
+    #     states['unixtime'], 
+    #     states['progress'], 
+    #     states['len_profile'],
+    #     )).reshape(-1)
+
+    # ### get flexibility
+    # states['flexibility'] = np.asarray(compute_flexibility_ntcl(
+    #     states['unixstart'],
+    #     states['unixend'],
+    #     states['predicted_finish'],
+    #     states['len_profile'],
+    #     )).reshape(-1)
+    
+    return states
+
 
 
 # def device_ntcl(states):

@@ -24,6 +24,11 @@ class Base():
         self.dict_house = {}
         self.idx = 0
         self.pause = 1e-6
+
+        self.n_house = 0
+        self.n_units = 0
+        self.n_ldc = 0
+        self.n_b2g = 0
         
 
         self.list_variable_states = [
@@ -59,10 +64,10 @@ class Base():
 
     
     def add_device(self, dict_devices, idx, distribution, dict_global_states):
-        self.n_house = int(dict_devices['house']['n_units'])
-        self.n_units = int(dict_devices[self.load_type]['n_units'])
-        self.n_ldc = int(dict_devices[self.load_type]['n_ldc'])
-        n_b2g = int(dict_devices[self.load_type]['n_b2g'])
+        self.n_house += int(dict_devices['house']['n_units'])
+        self.n_units += int(dict_devices[self.load_type]['n_units'])
+        self.n_ldc += int(dict_devices[self.load_type]['n_ldc'])
+        self.n_b2g += int(dict_devices[self.load_type]['n_b2g'])
         self.dict_global_states = dict_global_states
 
         print(f'Creating {self.load_type} {self.n_units} units...')
@@ -85,11 +90,11 @@ class Base():
             idxs = df.index
             if distribution=='per_device':
                 df['b2g'] = 0
-                selection = np.random.choice(idxs, n_b2g, replace=False)
+                selection = np.random.choice(idxs, self.n_b2g, replace=False)
                 df.loc[selection, 'b2g'] = 1
             else:
-                df.loc[idxs[0:n_b2g], 'b2g'] = 1
-                df.loc[idxs[n_b2g:], 'b2g'] = 0
+                df.loc[idxs[0:self.n_b2g], 'b2g'] = 1
+                df.loc[idxs[self.n_b2g:], 'b2g'] = 0
 
         # self.dict_constant_states = df.to_dict(orient='list')
         self.dict_variable_states = df.to_dict(orient='list')
@@ -115,7 +120,10 @@ class Base():
         if 'priority' not in self.dict_variable_states.keys(): 
             self.dict_variable_states['priority'] = np.random.uniform(20, 80, self.n_units)
         self.dict_variable_states['priority_offset'] = np.subtract(self.dict_variable_states['ldc_signal'], self.dict_variable_states['priority'])
-            
+
+        if self.load_type in ['house', 'baseload']:
+            self.dict_variable_states['connected'] = np.ones(house_instance.n_units)
+
         if self.load_type in ['heatpump', 'heater']:
             self.dict_variable_states['latitude'] = house_instance.dict_variable_states['latitude'][np.asarray(np.arange(self.n_units)%house_instance.n_units, dtype=int).reshape(-1)]
             self.dict_variable_states['longitude'] = house_instance.dict_variable_states['longitude'][np.asarray(np.arange(self.n_units)%house_instance.n_units, dtype=int).reshape(-1)]
@@ -204,6 +212,21 @@ class Base():
             self.dict_variable_states['flexibility'] = np.ones(self.n_units) * 0.9
             self.dict_variable_states['capacity'] = np.clip(np.round(np.random.normal(270*18, 270, self.n_units), -1), a_min=270*10, a_max=270*56)
 
+
+        if self.load_type in ['dishwasher', 'clotheswasher', 'clothesdryer']:
+            ### setup the profiles
+            try:
+                with open('./profiles/nntcl.json') as f:
+                    nntcl = json.load(f)
+                    self.dict_data = nntcl[self.load_type.capitalize()]
+                    self.dict_variable_states['len_profile'] = np.array([len(self.dict_data[k]) for k in self.dict_variable_states['profile']])
+                del nntcl  # free up the memory
+            except Exception as e:
+                print(f'Error clotheswasher setup:{e}')
+        
+        if self.load_type in ['baseload', 'house']:
+            self.df, self.validity = fetch_baseload(self.dict_global_states['season'])
+            
         
         
 
@@ -314,6 +337,32 @@ class NonThermostatControlledLoad(Base):
 
 
 
+    def step(self):
+        try:
+            ### update common variables
+            update_from_common(self.dict_variable_states, self.dict_global_states)
+            
+            ### update schedules
+            update_schedules(self.dict_variable_states, self.dict_global_states)
+
+            ### update device proposed mode, status, priority, and demand
+            device_ntcl(self.dict_variable_states, self.dict_data)
+
+            ### update ldc_dongle approval for the proposed status and demand
+            ldc_dongle(self.dict_variable_states, self.dict_global_states)
+            
+            # ### send data to main
+            # self.pipe_agg_clotheswasher1.send(self.dict_variable_states)
+            
+            ### update device states, e.g., temp_in, temp_mat, progress, soc, through simulation
+            enduse_ntcl(self.dict_variable_states)
+
+        except Exception as e:
+            print(f"Error {self.load_type}: {e}")
+        
+
+
+
 
 class BatteryBasedLoad(Base):
     '''
@@ -323,6 +372,23 @@ class BatteryBasedLoad(Base):
         super(BatteryBasedLoad, self).__init__()
         Base.__init__(self)
         self.device_class = 'bbl'
+    
+    def step(self):
+        ### update common variables
+        update_from_common(self.dict_variable_states, self.dict_global_states)
+        
+        ### update device proposed mode, status, priority, and demand
+        device_battery(self.dict_variable_states)
+
+        ### update ldc_dongle approval for the proposed status and demand
+        ldc_dongle(self.dict_variable_states, self.dict_global_states)
+        
+        # ### send data to main
+        # self.pipe_agg_storage1.send(self.dict_variable_states)
+
+        ### update device states, e.g., temp_in, temp_mat, progress, soc, through simulation
+        enduse_battery(self.dict_variable_states)
+
 
 
 class StaticGenerator(Base):
@@ -343,6 +409,7 @@ class Solar(StaticGenerator):
         super(Solar, self).__init__()
         StaticGenerator.__init__(self)
         self.load_type = 'solar'
+        
 
 
 class Wind(StaticGenerator):
@@ -363,6 +430,26 @@ class Ev(BatteryBasedLoad):
         super(Ev, self).__init__()
         BatteryBasedLoad.__init__(self)
         self.load_type = 'ev'
+
+    def step(self):
+        ### update common variables
+        update_from_common(self.dict_variable_states, self.dict_global_states)
+        
+        ### update schedules
+        update_schedules(self.dict_variable_states, self.dict_global_states)
+
+        ### update device proposed mode, status, priority, and demand
+        device_battery(self.dict_variable_states)
+
+        ### update ldc_dongle approval for the proposed status and demand
+        ldc_dongle(self.dict_variable_states, self.dict_global_states)
+        
+        # ### send data to main
+        # self.pipe_agg_ev1.send(self.dict_variable_states)
+
+        ### update device states, e.g., temp_in, temp_mat, progress, soc, through simulation
+        enduse_battery(self.dict_variable_states)
+
 
 
 class Storage(BatteryBasedLoad):
@@ -387,7 +474,21 @@ class House(NonThermostatControlledLoad):
         NonThermostatControlledLoad.__init__(self)
         self.device_class = 'ntcl'
         self.load_type = 'house'
+        
+    def step(self):
+        ### update common variables
+        update_from_common(self.dict_variable_states, self.dict_global_states)
 
+        ### update baseload
+        sk = np.mod(np.add(np.divide(self.dict_variable_states['schedule_skew'], 60), self.dict_global_states['weekminute']), 10080)  # 10080 minutes in a week
+        self.dict_variable_states['actual_demand'] = np.array([self.df.loc[x, y] for x, y in zip(sk.astype(int), self.dict_variable_states['schedule'])]) + np.abs(np.random.normal(0,10, self.n_units))
+    
+        # ### send update to main
+        # self.pipe_agg_baseload1.send(self.dict_variable_states)
+        
+        ### fetch next batch of data
+        if (self.dict_global_states['season']!=self.validity['season']):
+            self.df, self.validity = fetch_baseload(self.dict_global_states['season'])
         
 
 
@@ -401,7 +502,22 @@ class Baseload(NonThermostatControlledLoad):
         self.device_class = 'ntcl'
         self.load_type = 'baseload'
 
+    def step(self):
+        ### update common variables
+        update_from_common(self.dict_variable_states, self.dict_global_states)
 
+        ### update baseload
+        sk = np.mod(np.add(np.divide(self.dict_variable_states['schedule_skew'], 60), self.dict_global_states['weekminute']), 10080)  # 10080 minutes in a week
+        self.dict_variable_states['actual_demand'] = np.array([self.df.loc[x, y] for x, y in zip(sk.astype(int), self.dict_variable_states['schedule'])]) + np.abs(np.random.normal(0,10, self.n_units))
+    
+        # ### send update to main
+        # self.pipe_agg_baseload1.send(self.dict_variable_states)
+        
+        ### fetch next batch of data
+        if (self.dict_global_states['season']!=self.validity['season']):
+            self.df, self.validity = fetch_baseload(self.dict_global_states['season'])
+        
+        
 
 class Clotheswasher(NonThermostatControlledLoad):
     '''
@@ -412,6 +528,7 @@ class Clotheswasher(NonThermostatControlledLoad):
         NonThermostatControlledLoad.__init__(self)
         self.device_class = 'ntcl'
         self.load_type = 'clotheswasher'
+        
         
 
 
@@ -424,6 +541,7 @@ class Clothesdryer(NonThermostatControlledLoad):
         NonThermostatControlledLoad.__init__(self)
         self.device_class = 'ntcl'
         self.load_type = 'clothesdryer'
+        
 
 
 
@@ -436,6 +554,7 @@ class Dishwasher(NonThermostatControlledLoad):
         NonThermostatControlledLoad.__init__(self)
         self.device_class = 'ntcl'
         self.load_type = 'dishwasher'
+        
 
 
 
@@ -527,6 +646,8 @@ class Waterheater(ThermostatControlledLoad):
             
         # dict_save = {}
 
+
+class Network(Base)
     
 
 
@@ -652,41 +773,10 @@ class Aggregator(Base):
         ### update tasks
         for k, v in self.load_instances.items():
             v.step()
-
-        k = 'heatpump'
-        print(k, self.load_instances[k].dict_variable_states['temp_in'].mean())
+            # print(k)
         
         print(time.perf_counter()- t)
         
-
-
-n_houses = 60
-n_ldc = 1.0
-n_b2g = 1.0
-idx = 10
-distribution = 'per_device'
-app_per_house = dict(house=1, baseload=1, heatpump=0.61, heater=1.31, waterheater=0.8,
-                fridge=1.31, freezer=0.5, clotheswasher=1.08, clothesdryer=0.7816,
-                dishwasher=0.6931, ev=0.3, storage=0.3, solar=0.3, wind=0.3)
-
-devices_to_simulate = [x for x in app_per_house.keys() if app_per_house[x]>0]
-ldc_devices = [x for x in devices_to_simulate if x not in ['house', 'baseload', 'solar', 'wind', 'fridge', 'freezer', 'dishwasher', 'clotheswasher']]
-b2g_devices = ['ev', 'storage']
-
-dict_devices = {k:{
-    'n_units':int(n_houses*app_per_house[k]), 
-    'n_ldc': (k in ldc_devices)*int(n_houses*n_ldc*app_per_house[k]),
-    'n_b2g': (k in b2g_devices)*int(n_houses*n_b2g*app_per_house[k]),
-    } for k in devices_to_simulate}
-            
-if 'storage' in devices_to_simulate:
-    dict_devices['storage']['n_b2g'] = int(n_houses*app_per_house['storage']) # set all batteries as b2g capable
-
-
-
-
-
-
 
 
 
@@ -700,9 +790,38 @@ if 'storage' in devices_to_simulate:
 
 
 if __name__ == "__main__":
+    n_houses = 60
+    n_ldc = 1.0
+    n_b2g = 1.0
+    idx = 10
+    distribution = 'per_device'
+    app_per_house = dict(house=1, baseload=1, heatpump=0.61, heater=1.31, waterheater=0.8,
+                    fridge=1.31, freezer=0.5, clotheswasher=1.08, clothesdryer=0.7816,
+                    dishwasher=0.6931, ev=0.3, storage=0.3, solar=0.3, wind=0.3)
+
+    devices_to_simulate = [x for x in app_per_house.keys() if app_per_house[x]>0]
+    ldc_devices = [x for x in devices_to_simulate if x not in ['house', 'baseload', 'solar', 'wind', 'fridge', 'freezer', 'dishwasher', 'clotheswasher']]
+    b2g_devices = ['ev', 'storage']
+
+    dict_devices = {k:{
+        'n_units':int(n_houses*app_per_house[k]), 
+        'n_ldc': (k in ldc_devices)*int(n_houses*n_ldc*app_per_house[k]),
+        'n_b2g': (k in b2g_devices)*int(n_houses*n_b2g*app_per_house[k]),
+        } for k in devices_to_simulate}
+                
+    if 'storage' in devices_to_simulate:
+        dict_devices['storage']['n_b2g'] = int(n_houses*app_per_house['storage']) # set all batteries as b2g capable
+
+
+
+
+
+
+
+
     b = Aggregator()
     b.add_device(dict_devices, idx, distribution)
     b.initialize_states()
-    for i in range(10):
+    for i in range(100):
         b.step()
 

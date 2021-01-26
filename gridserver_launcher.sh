@@ -13,6 +13,8 @@ export PATH=/home/pi/anaconda3/bin:$PATH && cd /home/pi/ldc_project/ldc_gridserv
 export PATH=/home/pi/anaconda3/bin:$PATH && cd /home/pi/ldc_project/ && python log_compiler.py& 
 # run grid server
 export PATH=/home/pi/anaconda3/bin:$PATH && cd /home/pi/ldc_project/ldc_gridserver/ &&  gunicorn grid_server:server -b :15003 &  # grid server gui
+# run home server
+export PATH=/home/pi/anaconda3/bin:$PATH && cd /home/pi/ldc_project/ldc_homeserver/ &&  gunicorn home_server:server -b :21003 &  # grid server gui
 # run load profile viewer
 export PATH=/home/pi/anaconda3/bin:$PATH && cd /home/pi/load_profiles/ && python app.py&  # load profiles gui
 

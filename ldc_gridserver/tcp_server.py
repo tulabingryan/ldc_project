@@ -190,7 +190,7 @@ class TcpServer(multiprocessing.Process):
                 #   with open(filename, 'a') as f:
                 #     df_agg.to_csv(f, mode='a', header=f.tell()==0, index=False)
                 #     time.sleep(1)
-                time.sleep(0.5)
+                time.sleep(0.1)
             except Exception as e:
                 print("Error tcp_server.save_data:", e)
                 pass

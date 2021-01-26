@@ -7,6 +7,7 @@ import dash
 from dash.dependencies import Output, Input, State
 import dash_core_components as dcc
 import dash_html_components as html
+import dash_bootstrap_components as dbc
 
 import plotly.express as px
 # from flask_caching import Cache
@@ -310,6 +311,7 @@ def send_command(dict_cmd, ip='192.168.1.3', port=10000, report=True, timeout=0.
     try:
         # ip="224.0.2.3"
         response = MULTICAST.send(dict_cmd, ip=ip, port=port, timeout=timeout)
+        
         for k, v in response.items():
             if report:
                 print('sent:', dict_cmd)
@@ -453,6 +455,12 @@ send_command(dict_cmd={"cmd": f"0 {ldc_signal}"}, ip=tcp_ip, port=tcp_port, time
 
 df_data = get_data(day=datetime.datetime.now().strftime('%Y_%m_%d'))#.reset_index(drop=True)
 
+algo_labels = {
+        'no_ldc': 'Normal', 
+        'basic_ldc': 'Basic',
+        'advanced_ldc': 'Advanced',
+        'ripple_control': 'Ripple'
+        }
 
 # returns logo div
 def get_logo():
@@ -521,10 +529,11 @@ def drop_load(n_clicks_timestamp):
     Input(component_id='cmd-algorithm', component_property='value'),
     Input(component_id='cmd-set-target', component_property='value'),
     # Input(component_id='btn_cmd_drop', component_property='n_clicks_timestamp'),
-    Input(component_id='input-target-kw', component_property='value')],
+    Input(component_id='input-target-kw', component_property='value'),
+    Input(component_id='periodic-target-update', component_property='n_intervals')],
     [])
-def update_settings(n_submit, algorithm, set_target, target_watt):
-    global refresh_rate, gain, dict_cmd, dict_agg, cmd_algorithm, cmd_target_watt, ldc_signal, latest_demand
+def update_settings(n_submit, algorithm, set_target, target_watt, n_intervals):
+    global refresh_rate, gain, dict_cmd, dict_agg, cmd_algorithm, cmd_target_watt, ldc_signal #latest_demand
     try:
         cmd_algorithm = algorithm
         send_command(dict_cmd={"algorithm":cmd_algorithm}, ip=tcp_ip, port=tcp_port)
@@ -680,6 +689,18 @@ def update_display_gain(n_intervals):
         return f" {d['gain']}"
     return f' {np.round(gain, 2)}'
 
+
+@app.callback(
+    Output(component_id='display-algo', component_property='children'),
+    [Input(component_id='periodic-target-update', component_property='n_intervals')],
+    [])
+def update_display_algo(n_intervals):
+    # change the frequency signal 
+    global refresh_rate, gain, dict_cmd, dict_agg, cmd_algorithm, cmd_target_watt, ldc_signal, latest_demand
+    d = send_command(dict_cmd={'states':'algorithm'}, report=True)
+    if d: 
+        return f" {algo_labels[d['algorithm']]}"
+    return f' {cmd_algorithm}'
 
 @app.callback(
     Output(component_id='dropdown-history', component_property='option'),
@@ -1043,6 +1064,16 @@ def update_graph(history_range, json_data):
 
 
 
+@app.callback(
+    Output("modal", "is_open"),
+    [Input("open", "n_clicks"), Input("close", "n_clicks")],
+    [State("modal", "is_open")],
+)
+def toggle_modal(n1, n2, is_open):
+    if n1 or n2:
+        return not is_open
+    return is_open
+
 
 def serve_layout():
     return html.Div([
@@ -1172,7 +1203,7 @@ def render_status(history=True):
                             ],className='column', 
                         )
 
-    target_display_block = html.Div([
+    show_target_block = html.Div([
                         html.Label('Target:', 
                             className='column', 
                             style={
@@ -1200,7 +1231,7 @@ def render_status(history=True):
                         ], className='column', 
                     )
     
-    signal_display_block = html.Div([
+    show_signal_block = html.Div([
                         html.Label('Signal:', 
                             className='column',
                             style={
@@ -1224,7 +1255,7 @@ def render_status(history=True):
                         ], className='column',
                     )
                     
-    gain_display_block = html.Div([
+    show_gain_block = html.Div([
                     html.Label('Gain:', 
                         className='column',
                         style={
@@ -1248,7 +1279,32 @@ def render_status(history=True):
                     ], className='column',
                 )
     
-    algorithm_set_block = html.Div([
+    show_algorithm_block = html.Div([
+                    html.Label('Algorithm:', 
+                        className='column',
+                        style={
+                            'color':'white', 
+                            'text-align':'left', 
+                            'display':'inline-block', 
+                            "position": "relative"
+                            }
+                        ),
+                    html.Div(id='display-algo', 
+                        children=f'{algo_labels[cmd_algorithm]}', 
+                        className='column',
+                        style={
+                            'font-size':'x-large', 
+                            'color':'white', 
+                            'text-align':'left', 
+                            'display':'inline-block', 
+                            "position": "relative"
+                            }
+                        ),
+                    ], className='column',
+                )
+    
+    ##################################################
+    set_algorithm_block = html.Div([
                         html.Label('Algorithm:', 
                             className='column',
                             style={
@@ -1270,9 +1326,9 @@ def render_status(history=True):
                             className='column',
                             style={
                                 'color':'white', 
-                                'margin': '3', 
+                                # 'margin': '3', 
                                 "position": "relative", 
-                                'display': 'block'}
+                                'display': 'inline-block'}
                             ),  
                         ], 
                         className='column',
@@ -1282,7 +1338,7 @@ def render_status(history=True):
                             }
                     )
 
-    target_set_block = html.Div([
+    set_target_block = html.Div([
                             html.Label('Set Target:', 
                                 className='column',
                                 style={
@@ -1297,13 +1353,13 @@ def render_status(history=True):
                                     {"label": "Auto", "value": 'auto'},
                                     {"label": "Manual (kW)", "value": 'manual'},
                                 ],
-                            value=dict_cmd["set_target"],
-                            className='column',
-                            style={
-                                'color':'white', 
-                                'margin': '3', 
-                                "position": "relative",
-                                }
+                                value=dict_cmd["set_target"],
+                                className='column',
+                                style={
+                                    'color':'white', 
+                                    'margin': '3', 
+                                    "position": "relative",
+                                    }
                             ),
                             dcc.Input(id='input-target-kw', 
                                 # value= np.round(float(cmd_target_watt)/1000, 3), # converted to kW
@@ -1318,8 +1374,8 @@ def render_status(history=True):
                                     'font-size': 'large', 
                                     'text-align': 'center', 
                                     'display':'inline-block', 
-                                    'width':'90%', 
-                                    'padding':'3', 
+                                    'width':'120', 
+                                    # 'padding':'3', 
                                     "position": "relative"
                                     }
                                 ),
@@ -1328,7 +1384,7 @@ def render_status(history=True):
                             style={'display':'inline-block', "position": "relative",}
                         )
     
-    signal_set_block = html.Div([
+    set_signal_block = html.Div([
                             html.Label('Set signal (Hz):', 
                                 className='column',
                                 style={
@@ -1352,7 +1408,7 @@ def render_status(history=True):
                                     'font-size':'large', 
                                     'text-align':'center', 
                                     'display':'inline-block', 
-                                    'width':'90%', 
+                                    'width':'120', 
                                     'padding':'0', 
                                     "position": "relative"
                                     }
@@ -1367,7 +1423,7 @@ def render_status(history=True):
                                 },
                         )
 
-    gain_set_block = html.Div([
+    set_gain_block = html.Div([
                         html.Label('Set gain:', 
                             className='column',
                             style={
@@ -1391,7 +1447,7 @@ def render_status(history=True):
                                 # 'font-size':'large', 
                                 'text-align':'center', 
                                 'display':'inline-block', 
-                                'width':'90%', 
+                                'width':'120', 
                                 'padding':'0', 
                                 "position": "relative"
                                 }
@@ -1406,7 +1462,7 @@ def render_status(history=True):
                             },
                     )
 
-    emergency_shed_block = html.Div([
+    set_emergency_block = html.Div([
                                 html.Label('Emergency load shedding:', 
                                     className='column',
                                     style={
@@ -1417,14 +1473,14 @@ def render_status(history=True):
                                         "float": "left"
                                         }
                                     ),
-                                html.Button('Shed!', 
+                                html.Button('Drop!', 
                                     id='btn_cmd_drop', 
                                     n_clicks_timestamp=0, 
                                     className='column', 
                                     style={
                                         'text-align':'center', 
                                         'font-size':'large', 
-                                        'width': '90%',
+                                        'width': '60',
                                         'border-radius':'10px', 
                                         'hover':{
                                             'background-color':'rgb(255,255,255)', 
@@ -1436,8 +1492,35 @@ def render_status(history=True):
                                 className='column', 
                             )
 
+    settings = html.Div(
+                [
+                    dbc.Button("Change Settings", id="open"),
+                    dbc.Modal(
+                        [
+                            dbc.ModalHeader("Settings"),
+                            dbc.ModalBody(
+                                children=[
+                                    set_algorithm_block,
+                                    set_target_block,
+                                    set_signal_block,
+                                    set_gain_block,
+                                    set_emergency_block,
+                                ]
+                            ),
+                            empty,
+                            dbc.ModalFooter(
+                                dbc.Button("Close", id="close", className="ml-auto")
+                            ),
+                        ],
+                        id="modal",
+                        size='sm',
+                        
+                    ),
+                ]
+            )
+
     if history:
-        settings_block = html.Div([
+        sidebar = html.Div([
             plot_range_block,
             ],
             className='column s12 m2 l2',
@@ -1452,18 +1535,15 @@ def render_status(history=True):
             },
         )
     else:
-        settings_block = html.Div([
+        sidebar = html.Div([
             plot_range_block,
             empty,
-            target_display_block,
-            signal_display_block,
-            gain_display_block,
+            show_target_block,
+            show_signal_block,
+            show_gain_block,
+            show_algorithm_block,
             empty,
-            algorithm_set_block,
-            target_set_block,
-            signal_set_block,
-            gain_set_block,
-            emergency_shed_block,
+            settings,
             ], 
             # className='row', 
             # style={'color':'white', 'display':'inline-block', 'margin':'3', 'width':'150px'},
@@ -1501,7 +1581,7 @@ def render_status(history=True):
     return html.Div(children=[
                 banner,
                 ### setttings
-                settings_block,
+                sidebar,
                 ### hidden divs
                 hidden_data_block,
                 ### actual graph

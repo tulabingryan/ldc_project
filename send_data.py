@@ -80,13 +80,19 @@ def sync_files(from_path, to_path, remove_source=False, options='-auzhe'):
 
     try:
         if remove_source:
-            os.system(f'sshpass -p "ldc" rsync {options} ssh -T /home/pi --quiet --remove-source-files {from_path} {to_path}') 
+            cmd = f'sshpass -p "ldc" rsync {options} -e ssh -T /home/pi --remove-source-files {from_path} {to_path}'
         else:
-            os.system(f'sshpass -p "ldc" rsync {options} ssh -T /home/pi --quiet --exclude-from ".send_data-exluded" {from_path} {to_path}')
+            cmd = f'sshpass -p "ldc" rsync {options} -e ssh -T /home/pi --quiet --exclude-from ".send_data-exluded" {from_path} {to_path}'
+        
+        response = os.system(cmd)
+        
     except Exception as e:
         print("Error:", e, from_path, to_path)
+        raise e
+    except KeyboardInterrupt:
+        raise KeyboardInterrupt
 
-        
+
 
 def get_local_ip(report=False):
     # get local ip address
@@ -110,12 +116,12 @@ def send_data():
     parser.add_option('-n', '--now', dest='n', default=0, help='now')
     options, args = parser.parse_args(sys.argv[1:])
 
-    interval = 0.1
+    interval = 0.001
     print(f"Sending data logs to server...")
-    if not options.n:
-        rsync_options = '-avuhe'
+    if options.n:
+        rsync_options = "-avzW"
     else:
-        rsync_options = '-q'
+        rsync_options = "-aqzW"
 
     
 
@@ -124,27 +130,39 @@ def send_data():
             t = time.perf_counter()
 
             ### send data logs
+            sync_files(from_path=f'/home/pi/ldc_project/history/', 
+                to_path=f'pi@192.168.1.81:/home/pi/studies/ardmore/temp/', 
+                remove_source=True, options='-aqz')
+            
+
+            sync_files(from_path=f'/home/pi/ldc_project/logs/', 
+                to_path=f'pi@192.168.1.81:/home/pi/studies/ardmore/logs/', 
+                remove_source=True, options='-aqz')
+
+
             files_to_send = glob.glob(f'/home/pi/ldc_project/history/*.pkl.xz')
             files_to_send.sort(key=os.path.getmtime)
             files_to_send = files_to_send[::-1]
-            for f in files_to_send[1:]:
-                from_path = f
-                to_path = f'pi@192.168.1.81:/home/pi/studies/ardmore/temp/{f.split("/")[-1]}'
+            for f in files_to_send:
+                filename = f.split("/")[-1]
+                from_path = f'/home/pi/ldc_project/history/{filename}'
+                to_path = f'pi@192.168.1.81:/home/pi/studies/ardmore/temp/{filename}'
                 sync_files(from_path=from_path, to_path=to_path, 
-                    remove_source=True, options=rsync_options)
+                        remove_source=True, options=rsync_options)
+            
             
             ### send error logs
             files_to_send = glob.glob(f'/home/pi/ldc_project/logs/*')
             files_to_send.sort(key=os.path.getmtime)
             files_to_send = files_to_send[::-1]
             for f in files_to_send:
-                from_path = f
-                to_path = f'pi@192.168.1.81:/home/pi/studies/ardmore/logs/{f.split("/")[-1]}'
+                filename = f.split("/")[-1]
+                from_path = f'/home/pi/ldc_project/logs/{filename}'
+                to_path = f'pi@192.168.1.81:/home/pi/studies/ardmore/logs/{filename}'
                 sync_files(from_path=from_path, to_path=to_path, 
                     remove_source=True, options=rsync_options)
             
-
-            # local_ip = get_local_ip()  # ensures network connection
+            
             # now = datetime.datetime.now()
             # dt = now.timetuple()
             # today = now.strftime('%Y_%m_%d')
@@ -198,5 +216,7 @@ def send_data():
 
 
 if __name__ == '__main__':
-    send_data()
+    local_ip = get_local_ip()  # ensures network connection
+    if local_ip.endswith('.100'):
+        send_data()
 

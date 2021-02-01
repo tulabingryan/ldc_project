@@ -217,6 +217,6 @@ def send_data():
 
 if __name__ == '__main__':
     local_ip = get_local_ip()  # ensures network connection
-    if local_ip.endswith('.100'):
+    if local_ip.endswith('.100') or local_ip.endswith('192.168.1.3'):
         send_data()
 

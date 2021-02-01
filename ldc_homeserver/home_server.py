@@ -343,11 +343,11 @@ def update_graph(history_range, json_data):
             # df_data[list_avgna] = df_data[list_avgna].interpolate()
             
 
-            dict_params = {'power_kw': {'label':'house', 'fill':'none'}}
+            dict_params = {'power_kw': {'label':'house', 'fill':'tozeroy'}}
             if 'solar_p_w' in df_data.columns:
                 df_data['solar_kw'] = df_data['solar_p_w'] / 1000
                 # print(df_data['solar_kw'])
-                dict_params.update({'solar_kw':{'label':'solar', 'fill':'none'}})
+                dict_params.update({'solar_kw':{'label':'solar', 'fill':'tozeroy'}})
 
             if 'house_p_w' in df_data.columns:
                 df_data['house_total'] = df_data['house_p_w'] /1000
@@ -395,8 +395,9 @@ def update_graph(history_range, json_data):
                                         xaxis=dict(autorange=True),
                                         yaxis=dict(autorange=True, title='Power (kW)'),
                                         margin={'l':50,'r':1,'t':45,'b':50},
-                                        title='Total House Demand',
+                                        # title='Total House Demand',
                                         showlegend=True,
+                                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
                                         autosize=True,
                                         # height=400,
                                         font=dict(color='#CCCCCC'),
@@ -443,8 +444,8 @@ def update_graph(history_range, json_data):
                                             xaxis= dict(autorange=True),
                                             yaxis=dict(autorange=True, title='Power (kW)'),
                                             margin={'l':50,'r':1,'t':45,'b':50},
-                                            title='Devices Demand',
-                                            # legend=dict(font=dict(size=10), orientation='h', x=0.85, y=1.15),
+                                            # title='Devices Demand',
+                                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
                                             autosize=True,
                                             # height=400,
                                             font=dict(color='#CCCCCC'),
@@ -478,8 +479,8 @@ def update_graph(history_range, json_data):
                                             'layout' : go.Layout(xaxis= dict(autorange=True),
                                                         yaxis=dict(autorange=True, title='Temperature (C)'),
                                                         margin={'l':50,'r':1,'t':45,'b':50},
-                                                        title='Livability House Temperature',
-                                                        # legend=dict(font=dict(size=10), orientation='h', x=0.85, y=1.15),
+                                                        # title='Livability House Temperature',
+                                                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
                                                         autosize=True,
                                                         # height=400,
                                                         font=dict(color='#CCCCCC'),
@@ -522,7 +523,7 @@ def update_graph(history_range, json_data):
             #                             tickvals=[x for x in range(20)], 
             #                             ticktext=['0' if x%2==0 else '1' for x in range(20)]),
             #                             margin={'l':50,'r':1,'t':45,'b':50},
-            #                             title='Device Status',
+            #                             #title='Device Status',
             #                             # legend=dict(font=dict(size=10), orientation='h', x=0.85, y=1.15),
             #                             autosize=True,
             #                             # height=400,
@@ -559,8 +560,8 @@ def update_graph(history_range, json_data):
                         'layout' : go.Layout(xaxis= dict(autorange=True),
                                 yaxis=dict(autorange=True, title='Temperature (C)'),
                                 margin={'l':50,'r':1,'t':45,'b':50},
-                                title='Device Inside Temperature',
-                                # legend=dict(font=dict(size=10), orientation='h', x=0.85, y=1.15),
+                                # title='Device Inside Temperature',
+                                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
                                 autosize=True,
                                 # height=400,
                                 font=dict(color='#CCCCCC'),
@@ -598,7 +599,7 @@ def update_graph(history_range, json_data):
             #             'layout' : go.Layout(xaxis= dict(autorange=True),
             #                         yaxis=dict(autorange=True, title='Temperature (C)'),
             #                         margin={'l':50,'r':1,'t':45,'b':50},
-            #                         title='Device Target Temperature',
+            #                         #title='Device Target Temperature',
             #                         # legend=dict(font=dict(size=10), orientation='h', x=0.85, y=1.15),
             #                         autosize=True,
             #                         # height=400,

@@ -189,9 +189,6 @@ class SolarMonitor(multiprocessing.Process):
         
         return dict_response
         
-To find love is great,
-but to find a friend in the one you love is even better..
-Happy birthday lalab.
 
     def autorun(self, save=False, report=False, diagnostics=False):
         dict_history = {}

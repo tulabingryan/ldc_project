@@ -333,10 +333,15 @@ if __name__ == '__main__':
                 '2':'advanced_ldc', 
                 '3':'ripple_control'}
 
-    
-    
+    case_id = options.c
+    if case_id in dict_cases.keys():
+        simcase = dict_cases[int(case_id)]
+    else:
+        simcase = case_id
+
+
     if simulation==1:
-        case = dict_cases[int(options.c)]
+        case = simcase
         season = dict_season[int(options.e)]
         ndays = float(options.d)
         step_size = float(options.t)
@@ -588,6 +593,9 @@ if __name__ == '__main__':
                 clothesdryer=1,
                 dishwasher=1,
             ))
+
+            if local_ip.endswith('14.100') or local_ip.endswith('15.100'):
+                app_per_house.update({'ev':1})
 
         
         # elif device_ip==108:

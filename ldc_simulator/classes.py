@@ -476,20 +476,20 @@ class House(NonThermostatControlledLoad):
         self.load_type = 'house'
         
     def step(self):
-        ### update common variables
-        update_from_common(self.dict_variable_states, self.dict_global_states)
+        # ### update common variables
+        # update_from_common(self.dict_variable_states, self.dict_global_states)
 
-        ### update baseload
-        sk = np.mod(np.add(np.divide(self.dict_variable_states['schedule_skew'], 60), self.dict_global_states['weekminute']), 10080)  # 10080 minutes in a week
-        self.dict_variable_states['actual_demand'] = np.array([self.df.loc[x, y] for x, y in zip(sk.astype(int), self.dict_variable_states['schedule'])]) + np.abs(np.random.normal(0,10, self.n_units))
+        # ### update baseload
+        # sk = np.mod(np.add(np.divide(self.dict_variable_states['schedule_skew'], 60), self.dict_global_states['weekminute']), 10080)  # 10080 minutes in a week
+        # self.dict_variable_states['actual_demand'] = np.array([self.df.loc[x, y] for x, y in zip(sk.astype(int), self.dict_variable_states['schedule'])]) + np.abs(np.random.normal(0,10, self.n_units))
     
-        # ### send update to main
-        # self.pipe_agg_baseload1.send(self.dict_variable_states)
+        # # ### send update to main
+        # # self.pipe_agg_baseload1.send(self.dict_variable_states)
         
-        ### fetch next batch of data
-        if (self.dict_global_states['season']!=self.validity['season']):
-            self.df, self.validity = fetch_baseload(self.dict_global_states['season'])
-        
+        # ### fetch next batch of data
+        # if (self.dict_global_states['season']!=self.validity['season']):
+        #     self.df, self.validity = fetch_baseload(self.dict_global_states['season'])
+        pass
 
 
 class Baseload(NonThermostatControlledLoad):
@@ -622,7 +622,6 @@ class Waterheater(ThermostatControlledLoad):
         self.load_type = 'waterheater'
         self.dict_valve = {}
         
-        print('Running waterheater...')
 
     #     self.dict_waterheater.update(
     #         initialize_load(
@@ -647,7 +646,14 @@ class Waterheater(ThermostatControlledLoad):
         # dict_save = {}
 
 
-class Network(Base)
+class Network(Base):
+    '''
+    Generic class for electrical network.
+    '''
+    def __init__(self):
+        super(Network, self).__init__()
+        Base.__init__(self)
+        
     
 
 
@@ -709,47 +715,19 @@ class Aggregator(Base):
     def create_network(self):
         pass
 
-    def add_house(self):
-        self.factor = 1
-        for load_type in dict_new_devices.keys():
-            n_units = dict_new_devices[load_type]['n_units']  # new devices
-            n_ldc = dict_new_devices[load_type]['n_ldc']
-            n_b2g = dict_new_devices[load_type]['n_b2g']
-            if load_type in self.dict_devices.keys():
-                idx = self.idx + self.dict_devices[load_type]['n_units']  # exisiting number of devices
-                self.dict_devices[load_type].update({
-                    'n_units': self.dict_devices[load_type]['n_units'] + n_units,
-                    'n_ldc': self.dict_devices[load_type]['n_ldc'] + n_ldc,
-                    'n_b2g': self.dict_devices[load_type]['n_b2g'] + n_b2g,
-                    })
-            else:
-                idx = self.idx
-                self.dict_devices.update({load_type:{ 'n_units': n_units, 'n_ldc': n_ldc, 'n_b2g': n_b2g}
-                    })  # update number of devices
-
-        ### create house data
-        if 'house' in self.dict_devices.keys():
-            n_units = self.dict_devices['house']['n_units']
-            idx = self.idx
-            with pd.HDFStore('./specs/device_specs.h5', 'r') as store:
-                df = store.select('house', where='index>={} and index<{}'.format(idx, idx+n_units))
-            self.dict_house.update(df.to_dict(orient='list'))
-            for k, v in self.dict_house.items():
-                self.dict_house[k] = np.array(v)
-            del df
-
-        ### loads to run
-        self.loads_to_run = [str(a) for a in self.dict_devices.keys() if a!='house']
-        self.loads_to_run.sort()
-
-
     def add_device(self, dict_devices, idx, distribution):
         # self.list_load_instances.append(eval('Waterheater()'))
         for k in dict_devices.keys():
-            self.load_instances.update({k: eval(f'{k}()'.capitalize())})
+            if k=='house':
+                self.house = House()
+                self.house.add_device(dict_devices, idx, distribution, self.dict_global_states)
+            else:
+                self.load_instances.update({k: eval(f'{k}()'.capitalize())})
         
         for k, v in self.load_instances.items():
             v.add_device(dict_devices, idx, distribution, self.dict_global_states)
+
+        self.house.loads = self.load_instances
 
     def initialize_states(self):
         self.dict_global_states.update(clock(unixtime=self.dict_global_states['unixtime'], 
@@ -758,8 +736,13 @@ class Aggregator(Base):
         ### update weather
         self.dict_global_states.update(self.weather.get_weather(self.dict_global_states['unixtime']))
 
+        self.house_indices = {}
+
         for k, v in self.load_instances.items():
-            v.initialize_states(house_instance=self.load_instances['house'])
+            v.initialize_states(house_instance=self.house)
+            self.house_indices.update({k:{h:np.flatnonzero(v.dict_variable_states['house']==h) for h in self.house.dict_variable_states['name']}})
+
+        self.tt = 0
 
     def step(self):
         ### update clock
@@ -771,11 +754,22 @@ class Aggregator(Base):
         self.dict_global_states['current_task'] = self.df_schedules.iloc[self.dict_global_states['weekminute']]
 
         ### update tasks
-        for k, v in self.load_instances.items():
-            v.step()
-            # print(k)
-        
-        print(time.perf_counter()- t)
+        [v.step() for k, v in self.load_instances.items()]
+            
+        ### sum up powers
+        self.house.demand = [np.sum([d.dict_variable_states['actual_demand'][self.house_indices[k][h]].sum() for k, d in self.load_instances.items()]) for h in self.house.dict_variable_states['name']]
+        ### 
+
+        print(time.perf_counter()- t, self.dict_global_states['isotime'], self.house.loads['heatpump'].dict_variable_states['temp_in'][0])
+    
+    def autorun(self):
+        while True:
+            try:
+                self.step()
+            except Exception as e:
+                print(f"Error autorun:{e}")
+            except KeyboardInterrupt:
+                break
         
 
 
@@ -822,6 +816,5 @@ if __name__ == "__main__":
     b = Aggregator()
     b.add_device(dict_devices, idx, distribution)
     b.initialize_states()
-    for i in range(100):
-        b.step()
+    b.autorun()
 

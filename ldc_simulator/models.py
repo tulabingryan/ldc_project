@@ -2789,7 +2789,8 @@ def initialize_load(load_type, dict_devices, dict_house, idx, distribution, comm
         dict_out['connected'] = np.ones(n_units)
         dict_out['capacity'] = np.array([dict_ev[x]['capacity'] for x in dict_out['profile']]) * 1000 * 3600
         dict_out['charging_power'] = np.array([dict_ev[x]['charging_power'] for x in dict_out['profile']]) * 1000 
-        
+        dict_out['charging_power'][0] = 3300.0
+
         dict_out['daily_energy'] = np.multiply(np.clip(np.random.normal(0.6, 0.05, n_units), a_min=0.55, a_max=0.65), dict_out['capacity']) #[Ws]
         dict_out['km_per_kwh'] = np.clip(np.random.normal(6.0, 0.1, n_units), a_min=4.225, a_max=6.76) #[km/kWh] 1kWh per 6.5 km avg 
         dict_out['trip_distance'] = np.multiply(dict_out['km_per_kwh'], dict_out['daily_energy']/1e3/3.6e3) # [km] avg daily trip

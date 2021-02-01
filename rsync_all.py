@@ -56,7 +56,7 @@ def main():
 
   target_hosts = []
   if groups[0] == 11:
-    target_hosts = []
+    sync_folders(from_path='pi@192.168.1.81:/home/pi/ldc_project/', to_host='', to_path='/home/pi/ldc_project/', ssh_password="ldc")
     target_hosts.extend(['192.168.{}.{}'.format(x,y) for y in range(100, 128) for x in groups])
   elif groups[0]==1:
     target_hosts.extend(['192.168.1.3'])

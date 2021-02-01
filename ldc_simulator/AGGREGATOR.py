@@ -2086,7 +2086,7 @@ class Aggregator(multiprocessing.Process):
 
                 ### add all demand except heatpump and waterheater demand
                 total = np.sum([np.sum(self.dict_summary_demand[k]) for k in self.dict_summary_demand.keys() if not (k.startswith('heatpump') or k.startswith('waterheater'))])
-                total = min([total, 10e3]) #limit to 10kW
+                total = min([total, 6e3]) #limit to avoid tripping the breaker
 
                 ### convert total load value into 8-bit binary to drive 8 pinouts of piface
                 newpins, grainy, chroma = FUNCTIONS.relay_pinouts(total, self.df_relay, self.df_states, report=False)
